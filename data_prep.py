@@ -71,7 +71,8 @@ def get_rdkit_descriptors(atoms, coords, use_rdkit=True):
     symbols = {v: k for k, v in ATOMIC_NUMBERS.items()}
     xyz_str = f"{len(atoms)}\n\n"
     for a, c in zip(atoms, coords):
-        xyz_str += f"{symbols[a]} {c[0]} {c[1]} {c[2]}\n"
+        # Use fixed-point notation to avoid scientific notation which RDKit XYZ parser might fail on
+        xyz_str += f"{symbols[a]} {c[0]:.10f} {c[1]:.10f} {c[2]:.10f}\n"
 
     mol = Chem.MolFromXYZBlock(xyz_str)
     if mol is None:
