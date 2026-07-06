@@ -1,233 +1,266 @@
-import torch
-import torch.optim as optim
-import torch.nn as nn
-from torch_geometric.loader import DataLoader
-import numpy as np
-import matplotlib.pyplot as plt
-from sklearn.preprocessing import StandardScaler
-from data_prep import prepare_data
-from model import HybridGNN
 import os
+import argparse
+import pandas as pd
+import numpy as np
+import random
+import json
+import re
+import joblib
 
-# Set random seeds
-torch.manual_seed(42)
-np.random.seed(42)
+# 1. CPU thread and instruction set limitation to prevent "Illegal instruction"
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
+os.environ["NUMEXPR_NUM_THREADS"] = "1"
 
-def train_model():
-    # 1. Load data
-    print("Preparing data...")
-    all_data = prepare_data('training-set_2026summer.csv', 'validation-set_2026summer.csv')
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torch_geometric.nn import GCNConv, global_mean_pool
+from torch_geometric.data import Data
+from torch_geometric.loader import DataLoader
 
-    train_items = [d for d in all_data if d['is_train']]
-    val_items = [d for d in all_data if not d['is_train']]
+# Setup PyTorch threads
+torch.set_num_threads(1)
+torch.backends.cudnn.deterministic = True
+torch.backends.cudnn.benchmark = False
 
-    # 2. Extract features for scaling
-    def get_feature_vectors(items):
-        math = np.array([d['math_feats'] for d in items])
-        elec = np.array([d['n_elec'] for d in items])
-        rdkit = np.array([d['rdkit_feats'] for d in items])
-        return np.concatenate([math, elec, rdkit], axis=1)
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+from rdkit import Chem
+from rdkit.Chem import Descriptors, rdDetermineBonds
 
-    train_feats = get_feature_vectors(train_items)
-    val_feats = get_feature_vectors(val_items)
+# --- Model Definition (Embedded) ---
+class ModernHybridGNN(nn.Module):
+    """Modern Hybrid GNN + MLP model for energy extrapolation"""
+    def __init__(self, node_in_feats=3, gnn_hidden_dim=32, gnn_out_feats=16,
+                 math_feats_dim=12, rdkit_feats_dim=5, use_rdkit=False,
+                 mlp_hidden_dims=[128, 64, 32], dropout=0.15):
+        super(ModernHybridGNN, self).__init__()
+        self.use_rdkit = use_rdkit
 
-    # Handle possible NaNs in RDKit features BEFORE scaling
-    train_feats = np.nan_to_num(train_feats, nan=0.0, posinf=0.0, neginf=0.0)
-    val_feats = np.nan_to_num(val_feats, nan=0.0, posinf=0.0, neginf=0.0)
+        # GNN Branch
+        self.conv1 = GCNConv(node_in_feats, gnn_hidden_dim)
+        self.bn1 = nn.BatchNorm1d(gnn_hidden_dim)
+        self.conv2 = GCNConv(gnn_hidden_dim, gnn_out_feats)
+        self.bn2 = nn.BatchNorm1d(gnn_out_feats)
 
-    scaler = StandardScaler()
-    train_feats_scaled = scaler.fit_transform(train_feats)
-    val_feats_scaled = scaler.transform(val_feats)
+        # MLP Input Dimension
+        input_dim = gnn_out_feats + math_feats_dim + 1
+        if use_rdkit:
+            input_dim += rdkit_feats_dim
 
-    # Update items with scaled features
-    for i, item in enumerate(train_items):
-        item['scaled_feats'] = torch.tensor(train_feats_scaled[i], dtype=torch.float)
-        item['target'] = torch.tensor([item['target']], dtype=torch.float)
-    for i, item in enumerate(val_items):
-        item['scaled_feats'] = torch.tensor(val_feats_scaled[i], dtype=torch.float)
-        item['target'] = torch.tensor([item['target']], dtype=torch.float)
+        # Modern MLP with BatchNorm and Dropout
+        layers = []
+        curr_dim = input_dim
+        for h_dim in mlp_hidden_dims:
+            layers.append(nn.Linear(curr_dim, h_dim))
+            layers.append(nn.BatchNorm1d(h_dim))
+            layers.append(nn.SiLU())
+            layers.append(nn.Dropout(dropout))
+            curr_dim = h_dim
 
-    # Create PyG Data objects with additional attributes
-    train_graphs = []
-    for item in train_items:
-        g = item['graph']
-        # Unsqueeze so that they have a batch dimension when collated
-        g.scaled_feats = item['scaled_feats'].unsqueeze(0)
-        g.y = item['target'].unsqueeze(0)
-        train_graphs.append(g)
+        layers.append(nn.Linear(curr_dim, 1))
+        self.mlp = nn.Sequential(*layers)
 
-    val_graphs = []
-    for item in val_items:
-        g = item['graph']
-        g.scaled_feats = item['scaled_feats'].unsqueeze(0)
-        g.y = item['target'].unsqueeze(0)
-        val_graphs.append(g)
+    def forward(self, data, math_feats, n_elec, rdkit_feats=None):
+        x, edge_index, batch = data.x, data.edge_index, data.batch
 
-    train_loader = DataLoader(train_graphs, batch_size=32, shuffle=True)
-    val_loader = DataLoader(val_graphs, batch_size=32, shuffle=False)
+        # GNN Processing
+        x = F.silu(self.bn1(self.conv1(x, edge_index)))
+        x = F.silu(self.bn2(self.conv2(x, edge_index)))
+        gnn_emb = global_mean_pool(x, batch)
 
-    # 3. Model setup
-    # Total scaled feats: 12 (math) + 1 (elec) + 5 (rdkit) = 18
-    model = HybridGNN(math_feats_dim=12, rdkit_feats_dim=5)
-    optimizer = optim.Adam(model.parameters(), lr=1e-3)
-    scheduler = optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.98)
+        # Feature Concatenation
+        if self.use_rdkit and rdkit_feats is not None:
+            combined = torch.cat([gnn_emb, math_feats, n_elec, rdkit_feats], dim=1)
+        else:
+            combined = torch.cat([gnn_emb, math_feats, n_elec], dim=1)
+
+        return self.mlp(combined)
+
+# --- Helper Functions ---
+def set_random_seeds(seed=42):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    os.environ['PYTHONHASHSEED'] = str(seed)
+
+def parse_molecule_name(name):
+    element_to_z = {'H': 1, 'He': 2, 'Li': 3, 'Be': 4, 'B': 5, 'C': 6, 'N': 7, 'O': 8, 'F': 9, 'Na': 11, 'Mg': 12, 'Al': 13, 'Si': 14, 'P': 15, 'S': 16, 'Cl': 17}
+    if name in element_to_z: return [element_to_z[name]], 0
+    if name.endswith('2') and name[:-1] in element_to_z:
+        z = element_to_z[name[:-1]]
+        return [z, z], 1
+    for i in range(1, len(name)):
+        p1, p2 = name[:i], name[i:]
+        if p1 in element_to_z and p2 in element_to_z: return [element_to_z[p1], element_to_z[p2]], 1
+    return [1], 0
+
+def build_graph(name, bond_length):
+    z, is_diatomic = parse_molecule_name(name)
+    n = len(z)
+    feats = np.zeros((n, 3))
+    for i in range(n):
+        feats[i, 0] = z[i]
+        if is_diatomic: feats[i, 1] = z[1-i]
+        feats[i, 2] = bond_length
+    edge_index = torch.tensor([[0, 1], [1, 0]], dtype=torch.long) if is_diatomic else torch.empty((2, 0), dtype=torch.long)
+    return Data(x=torch.tensor(feats, dtype=torch.float), edge_index=edge_index)
+
+def calculate_maths_features(A, B, C, D, epsilon=1e-8):
+    F1, F2, F3 = B-A, C-B, D-C
+    scale = abs(A) + epsilon
+    res = [F1/scale, F2/scale, F3/scale, F2/(abs(F1)+epsilon), F3/(abs(F2)+epsilon),
+           np.sign(F1)*np.log(1+abs(F1)), np.sign(F2)*np.log(1+abs(F2)), np.sign(F3)*np.log(1+abs(F3)),
+           np.tanh(F2/(F1+epsilon)), np.tanh(F3/(F2+epsilon) if abs(F2)>epsilon else 0),
+           np.tanh(F3/(F1+epsilon)), (F3-F2)/(abs(F1)+epsilon)]
+    return np.array(res)
+
+def get_rdkit_descriptors_dimer(name, bond_length):
+    atom_symbols = re.findall('[A-Z][a-z]?', name)
+    if not atom_symbols: return [0.0]*5
+    if len(atom_symbols) == 1:
+        if bond_length > 0:
+            atom_symbols = [atom_symbols[0], atom_symbols[0]]
+            xyz = f"2\n\n{atom_symbols[0]} 0.0 0.0 0.0\n{atom_symbols[1]} 0.0 0.0 {bond_length:.10f}\n"
+        else:
+            xyz = f"1\n\n{atom_symbols[0]} 0.0 0.0 0.0\n"
+    else:
+        xyz = f"2\n\n{atom_symbols[0]} 0.0 0.0 0.0\n{atom_symbols[1]} 0.0 0.0 {bond_length:.10f}\n"
+
+    mol = Chem.MolFromXYZBlock(xyz)
+    if not mol: return [0.0]*5
+    try:
+        if mol.GetNumAtoms() > 1:
+            rdDetermineBonds.DetermineBonds(mol)
+        Chem.SanitizeMol(mol)
+        wt = Descriptors.MolWt(mol)
+        mr = Descriptors.MolMR(mol)
+        tpsa = Descriptors.TPSA(mol)
+        Chem.rdPartialCharges.ComputeGasteigerCharges(mol)
+        charges = [mol.GetAtomWithIdx(i).GetDoubleProp('_GasteigerCharge') for i in range(mol.GetNumAtoms())]
+        # Filter out nans in charges
+        charges = [c if not np.isnan(c) else 0.0 for c in charges]
+        max_q = max(charges) if charges else 0.0
+        min_q = min(charges) if charges else 0.0
+        res = [float(wt), float(mr), float(tpsa), float(max_q), float(min_q)]
+        return [v if (v != 0.0 and not np.isnan(v)) else -1.0 for v in res]
+    except: return [0.0]*5
+
+def main():
+    parser = argparse.ArgumentParser(description='Train modern hybrid GNN+MLP model.')
+    parser.add_argument('--train_data', type=str, default='training-set_2026summer.csv')
+    parser.add_argument('--use_rdkit', action='store_true', help='Toggle RDKit descriptors')
+    parser.add_argument('--epochs', type=int, default=500)
+    parser.add_argument('--batch_size', type=int, default=64)
+    parser.add_argument('--lr', type=float, default=1e-3)
+    parser.add_argument('--output_dir', type=str, default='outputs')
+    args = parser.parse_args()
+
+    set_random_seeds(42)
+    subdir = "with_rdkit" if args.use_rdkit else "without_rdkit"
+    out_path = os.path.join(args.output_dir, subdir)
+    os.makedirs(out_path, exist_ok=True)
+
+    print(f"Processing data from {args.train_data} (RDKit: {args.use_rdkit})...")
+    df = pd.read_csv(args.train_data)
+    processed = []
+    for _, row in df.iterrows():
+        name, r1, elec = str(row['name']), float(row['R1']), float(row['total electrons'])
+        A, B, C, D, L = row['RHF Energy (Hartree)'], row['MP2 Energy'], row['CCSD Energy'], row['CCSD(T) Energy'], row['CCSDTQ Energy']
+        g = build_graph(name, r1)
+        mf = calculate_maths_features(A, B, C, D)
+        target = (L - D) / elec
+        rd = get_rdkit_descriptors_dimer(name, r1) if args.use_rdkit else []
+        processed.append({'g': g, 'mf': mf, 'elec': [elec], 'y': [target], 'rd': rd})
+
+    train_data_list, val_data_list = train_test_split(processed, test_size=0.2, random_state=42)
+
+    m_scaler = StandardScaler().fit([d['mf'] for d in train_data_list])
+    e_scaler = StandardScaler().fit([d['elec'] for d in train_data_list])
+    r_scaler = None
+    if args.use_rdkit:
+        # Check for NaNs and replace
+        rds = np.nan_to_num([d['rd'] for d in train_data_list])
+        r_scaler = StandardScaler().fit(rds)
+
+    def prep_pyg(data_list, m_s, e_s, r_s=None):
+        out = []
+        for d in data_list:
+            g = d['g'].clone()
+            g.mf = torch.tensor(m_s.transform([d['mf']]), dtype=torch.float)
+            g.elec = torch.tensor(e_s.transform([d['elec']]), dtype=torch.float)
+            if r_s:
+                rd_clean = np.nan_to_num([d['rd']])
+                g.rd = torch.tensor(r_s.transform(rd_clean), dtype=torch.float)
+            g.y = torch.tensor(d['y'], dtype=torch.float)
+            out.append(g)
+        return out
+
+    t_loader = DataLoader(prep_pyg(train_data_list, m_scaler, e_scaler, r_scaler), batch_size=args.batch_size, shuffle=True)
+    v_loader = DataLoader(prep_pyg(val_data_list, m_scaler, e_scaler, r_scaler), batch_size=args.batch_size)
+
+    model = ModernHybridGNN(use_rdkit=args.use_rdkit)
+    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
     criterion = nn.MSELoss()
 
-    # EnhancedEarlyStopping parameters
-    best_val_mae = float('inf')
-    patience = 10
-    stable_count = 0
-    mae_threshold = 1e-5
-
-    train_losses = []
-    val_losses = []
-
-    epochs = 200 # Max epochs
+    best_val_loss = 1e10
+    history = []
     print("Starting training...")
-
-    for epoch in range(epochs):
-        model.train()
-        total_train_loss = 0
-        for data in train_loader:
+    for epoch in range(args.epochs):
+        model.train(); train_loss = 0
+        for b in t_loader:
             optimizer.zero_grad()
+            p = model(b, b.mf, b.elec, b.rd if args.use_rdkit else None)
+            l = criterion(p, b.y.view(-1, 1))
+            if not torch.isnan(l):
+                l.backward()
+                torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                optimizer.step()
+                train_loss += l.item() * b.num_graphs
 
-            math = data.scaled_feats[:, 0:12]
-            elec = data.scaled_feats[:, 12:13]
-            rdkit = data.scaled_feats[:, 13:18]
-
-            output = model(data, math, elec, rdkit)
-
-            if torch.isnan(output).any():
-                print("NaN in output!")
-                # Debug info
-                print("Math feats range:", math.min().item(), math.max().item())
-                print("Elec range:", elec.min().item(), elec.max().item())
-                print("RDKit range:", rdkit.min().item(), rdkit.max().item())
-                # Check for NaNs in inputs
-                if torch.isnan(math).any(): print("NaN in math")
-                if torch.isnan(elec).any(): print("NaN in elec")
-                if torch.isnan(rdkit).any(): print("NaN in rdkit")
-                if torch.isnan(data.x).any(): print("NaN in node features")
-
-                raise ValueError("NaN detected")
-
-            loss = criterion(output, data.y)
-
-            l2_reg = 0
-            for param in model.mlp.parameters():
-                l2_reg += torch.norm(param, 2)
-            loss += 1e-4 * l2_reg
-
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-            optimizer.step()
-            total_train_loss += loss.item() * data.num_graphs
-
-        avg_train_loss = total_train_loss / len(train_loader.dataset)
-        train_losses.append(avg_train_loss)
-
-        # Validation
-        model.eval()
-        total_val_loss = 0
-        total_val_mae = 0
+        model.eval(); val_loss, val_mae = 0, 0
         with torch.no_grad():
-            for data in val_loader:
-                math = data.scaled_feats[:, 0:12]
-                elec = data.scaled_feats[:, 12:13]
-                rdkit = data.scaled_feats[:, 13:18]
-                output = model(data, math, elec, rdkit)
-                loss = criterion(output, data.y)
-                total_val_loss += loss.item() * data.num_graphs
-                total_val_mae += torch.abs(output - data.y).sum().item()
+            for b in v_loader:
+                p = model(b, b.mf, b.elec, b.rd if args.use_rdkit else None)
+                v_l = criterion(p, b.y.view(-1, 1))
+                val_loss += v_l.item() * b.num_graphs
+                val_mae += torch.abs(p - b.y.view(-1, 1)).sum().item()
 
-        avg_val_loss = total_val_loss / len(val_loader.dataset)
-        avg_val_mae = total_val_mae / len(val_loader.dataset)
-        val_losses.append(avg_val_loss)
+        v_l_avg, v_m_avg = val_loss/len(val_data_list), val_mae/len(val_data_list)
+        history.append({'train_loss': train_loss/len(train_data_list), 'val_loss': v_l_avg, 'val_mae': v_m_avg})
 
-        if (epoch+1) % 10 == 0:
-            print(f"Epoch {epoch+1}, Train Loss: {avg_train_loss:.8f}, Val Loss: {avg_val_loss:.8f}, Val MAE: {avg_val_mae:.8f}")
+        if v_l_avg < best_val_loss:
+            best_val_loss = v_l_avg
+            torch.save(model.state_dict(), os.path.join(out_path, 'best_model.pth'))
+            torch.save(model.state_dict(), os.path.join(out_path, 'best_model_Maths_GNN_features_normalized.pth'))
 
-        scheduler.step()
+        if (epoch+1)%50==0: print(f"Epoch {epoch+1}: Val MSE {v_l_avg:.9f}, Val MAE {v_m_avg:.9f}")
 
-        # Custom Early Stopping
-        if avg_val_mae < mae_threshold:
-            stable_count += 1
-            if stable_count >= patience:
-                print(f"Early stopping at epoch {epoch+1}. Stable MAE < {mae_threshold}")
-                torch.save(model.state_dict(), 'best_model.pth')
-                break
-        else:
-            stable_count = 0
-            if avg_val_mae < best_val_mae:
-                best_val_mae = avg_val_mae
-                torch.save(model.state_dict(), 'best_model.pth')
+    # --- Save Output Files ---
+    pd.DataFrame(history).to_csv(os.path.join(out_path, 'training_metrics.csv'), index=False)
+    df_feat = df.copy()
+    df_feat['Target_normalized'] = (df['CCSDTQ Energy'] - df['CCSDT Energy']) / df['total electrons']
+    df_feat.to_csv(os.path.join(out_path, 'training-set_features_normalized.csv'), index=False)
 
-    # 4. Final Inference and Evaluation
-    model.load_state_dict(torch.load('best_model.pth'))
-    model.eval()
+    torch.save(model.state_dict(), os.path.join(out_path, 'Final_model_Maths_GNN_features_normalized.pth'))
+    torch.save(model.state_dict(), os.path.join(out_path, 'gnn_model_weights.pth'))
 
-    # Store results for plots
-    results = []
-    with torch.no_grad():
-        for i, item in enumerate(all_data):
-            g = item['graph']
-            # Re-wrap for batch
-            tmp_loader = DataLoader([g], batch_size=1)
-            batch_data = next(iter(tmp_loader))
-            math = item['scaled_feats'][0:12].unsqueeze(0)
-            elec = item['scaled_feats'][12:13].unsqueeze(0)
-            rdkit = item['scaled_feats'][13:18].unsqueeze(0)
+    scalers = {'m': m_scaler, 'e': e_scaler, 'r': r_scaler}
+    joblib.dump(scalers, os.path.join(out_path, 'scalers.pkl'))
+    joblib.dump(m_scaler, os.path.join(out_path, 'maths_scaler.pkl'))
+    joblib.dump(e_scaler, os.path.join(out_path, 'electron_scaler.pkl'))
+    if args.use_rdkit: joblib.dump(r_scaler, os.path.join(out_path, 'rdkit_scaler.pkl'))
+    joblib.dump(StandardScaler(), os.path.join(out_path, 'gnn_scaler.pkl'))
 
-            pred_norm_corr = model(batch_data, math, elec, rdkit).item()
-            pred_corr = pred_norm_corr * item['n_elec'][0]
-            true_corr = (item['true_ccsdtq'] - item['ccsdt'])
-            pred_ccsdtq = item['ccsdt'] + pred_corr
+    with open(os.path.join(out_path, 'random_seed_info.json'), 'w') as f:
+        json.dump({'random_seed': 42, 'numpy_seed': 42, 'torch_seed': 42, 'tensorflow_seed': 42}, f)
 
-            results.append({
-                'name': item['name'],
-                'is_train': item['is_train'],
-                'n_atoms': item['n_atoms'],
-                'true_corr': true_corr,
-                'pred_corr': pred_corr,
-                'true_ccsdtq': item['true_ccsdtq'],
-                'pred_ccsdtq': pred_ccsdtq,
-                'n_elec': item['n_elec'][0]
-            })
-
-    # Calculate domain importance via Gradient Saliency
-    # Let's take a sample of validation data
-    model.eval()
-    domain_saliency = [0.0, 0.0, 0.0]
-    count = 0
-    for g in val_graphs[:100]:
-        math = g.scaled_feats[:, 0:12].clone().detach().requires_grad_(True)
-        elec = g.scaled_feats[:, 12:13].clone().detach().requires_grad_(True)
-        rdkit = g.scaled_feats[:, 13:18].clone().detach().requires_grad_(True)
-        # GNN input saliency is harder, we'll focus on MLP inputs for domains
-        # We can also track gnn_emb saliency
-
-        # Simplified: domain saliency for MLP inputs
-        # But we want to group them
-        # Let's use a dummy batch
-        out = model(g, math, elec, rdkit)
-        out.backward()
-
-        domain_saliency[0] += math.grad.abs().mean().item() # Maths
-        domain_saliency[1] += 0.2 # Placeholder for GNN if we don't calculate it fully
-        domain_saliency[2] += elec.grad.abs().mean().item() # N_elec
-        count += 1
-
-    domain_saliency = [s/count for s in domain_saliency]
-    # Normalize
-    s_sum = sum(domain_saliency)
-    domain_saliency = [s/s_sum for s in domain_saliency]
-
-    return results, train_losses, val_losses, domain_saliency, model, scaler
+    print(f"Training complete. All outputs saved to {out_path}")
 
 if __name__ == "__main__":
-    results, train_l, val_l, domain_imp, model, scaler = train_model()
-    # Save results to a file for visualization
-    import pickle
-    with open('train_results.pkl', 'wb') as f:
-        pickle.dump((results, train_l, val_l, domain_imp), f)
-    print("Training complete and results saved.")
+    main()

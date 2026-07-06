@@ -1,0 +1,226 @@
+import os
+import argparse
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import joblib
+import re
+
+# 1. CPU thread and instruction set limitation to prevent "Illegal instruction"
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
+os.environ["NUMEXPR_NUM_THREADS"] = "1"
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torch_geometric.nn import GCNConv, global_mean_pool
+from torch_geometric.data import Data, Batch
+from torch_geometric.loader import DataLoader
+
+# Setup PyTorch threads
+torch.set_num_threads(1)
+torch.backends.cudnn.deterministic = True
+
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+from rdkit import Chem
+from rdkit.Chem import Descriptors, rdDetermineBonds
+
+# --- Model Definition (Must match train.py) ---
+class ModernHybridGNN(nn.Module):
+    def __init__(self, node_in_feats=3, gnn_hidden_dim=32, gnn_out_feats=16,
+                 math_feats_dim=12, rdkit_feats_dim=5, use_rdkit=False,
+                 mlp_hidden_dims=[128, 64, 32], dropout=0.15):
+        super(ModernHybridGNN, self).__init__()
+        self.use_rdkit = use_rdkit
+        self.conv1 = GCNConv(node_in_feats, gnn_hidden_dim)
+        self.bn1 = nn.BatchNorm1d(gnn_hidden_dim)
+        self.conv2 = GCNConv(gnn_hidden_dim, gnn_out_feats)
+        self.bn2 = nn.BatchNorm1d(gnn_out_feats)
+        input_dim = gnn_out_feats + math_feats_dim + 1
+        if use_rdkit: input_dim += rdkit_feats_dim
+        layers = []
+        curr_dim = input_dim
+        for h_dim in mlp_hidden_dims:
+            layers.append(nn.Linear(curr_dim, h_dim))
+            layers.append(nn.BatchNorm1d(h_dim))
+            layers.append(nn.SiLU())
+            layers.append(nn.Dropout(dropout))
+            curr_dim = h_dim
+        layers.append(nn.Linear(curr_dim, 1))
+        self.mlp = nn.Sequential(*layers)
+
+    def forward(self, data, math_feats, n_elec, rdkit_feats=None):
+        x, edge_index, batch = data.x, data.edge_index, data.batch
+        x = F.silu(self.bn1(self.conv1(x, edge_index)))
+        x = F.silu(self.bn2(self.conv2(x, edge_index)))
+        gnn_emb = global_mean_pool(x, batch)
+        if self.use_rdkit and rdkit_feats is not None:
+            combined = torch.cat([gnn_emb, math_feats, n_elec, rdkit_feats], dim=1)
+        else:
+            combined = torch.cat([gnn_emb, math_feats, n_elec], dim=1)
+        return self.mlp(combined)
+
+# --- Preprocessing Functions ---
+def parse_xyz(filepath):
+    if not os.path.exists(filepath): return None
+    with open(filepath, 'r') as f: lines = f.readlines()
+    num = int(lines[0])
+    atoms, coords = [], []
+    for line in lines[2:2+num]:
+        parts = line.split()
+        if not parts: continue
+        atoms.append(re.sub(r'[^a-zA-Z]', '', parts[0]))
+        coords.append([float(x) for x in parts[1:4]])
+    element_to_z = {'H': 1, 'He': 2, 'Li': 3, 'Be': 4, 'B': 5, 'C': 6, 'N': 7, 'O': 8, 'F': 9, 'Na': 11, 'Mg': 12, 'Al': 13, 'Si': 14, 'P': 15, 'S': 16, 'Cl': 17, 'Ca': 20, 'Sr': 38, 'Ba': 56, 'Ti': 22, 'V': 23}
+    z_list = [element_to_z.get(a, 1) for a in atoms]
+    coords = np.array(coords)
+    coords = coords - np.mean(coords, axis=0) # Centering
+    return z_list, coords, atoms
+
+def build_poly_graph(z, coords, els):
+    radii = {'H': 0.37, 'C': 0.77, 'N': 0.75, 'O': 0.73, 'F': 0.57, 'P': 1.07, 'S': 1.05, 'Cl': 1.02, 'Be': 1.05, 'Mg': 1.50, 'Ca': 1.80, 'Sr': 2.00, 'Ba': 2.15, 'Ti': 2.10, 'V': 2.30}
+    adj, lens = [], []
+    for i in range(len(z)):
+        for j in range(i + 1, len(z)):
+            dist = np.linalg.norm(coords[i] - coords[j])
+            if dist < (radii.get(els[i], 0.7) + radii.get(els[j], 0.7)) * 1.2:
+                adj.extend([[i, j], [j, i]]); lens.append(dist)
+    avg_l = np.mean(lens) if lens else 0.0
+    feats = np.zeros((len(z), 3))
+    for i in range(len(z)):
+        feats[i, 0] = z[i]
+        neighs = [z[edge[1]] for edge in np.array(adj).reshape(-1, 2) if edge[0] == i] if adj else []
+        if neighs: feats[i, 1] = neighs[0]
+        feats[i, 2] = avg_l
+    return Data(x=torch.tensor(feats, dtype=torch.float), edge_index=torch.tensor(adj, dtype=torch.long).t() if adj else torch.empty((2, 0), dtype=torch.long))
+
+def calculate_maths_features(A, B, C, D, epsilon=1e-8):
+    F1, F2, F3 = B-A, C-B, D-C
+    scale = abs(A) + epsilon
+    res = [F1/scale, F2/scale, F3/scale, F2/(abs(F1)+epsilon), F3/(abs(F2)+epsilon),
+           np.sign(F1)*np.log(1+abs(F1)), np.sign(F2)*np.log(1+abs(F2)), np.sign(F3)*np.log(1+abs(F3)),
+           np.tanh(F2/(F1+epsilon)), np.tanh(F3/(F2+epsilon) if abs(F2)>epsilon else 0),
+           np.tanh(F3/(F1+epsilon)), (F3-F2)/(abs(F1)+epsilon)]
+    return np.array(res)
+
+def get_rdkit_descriptors_poly(els, coords):
+    xyz = f"{len(els)}\n\n"
+    for el, c in zip(els, coords): xyz += f"{el} {c[0]:.10f} {c[1]:.10f} {c[2]:.10f}\n"
+    mol = Chem.MolFromXYZBlock(xyz)
+    if not mol: return [0.0]*5
+    try:
+        if mol.GetNumAtoms() > 1: rdDetermineBonds.DetermineBonds(mol)
+        Chem.SanitizeMol(mol)
+        wt = Descriptors.MolWt(mol); mr = Descriptors.MolMR(mol); tpsa = Descriptors.TPSA(mol)
+        Chem.rdPartialCharges.ComputeGasteigerCharges(mol)
+        charges = [mol.GetAtomWithIdx(i).GetDoubleProp('_GasteigerCharge') for i in range(mol.GetNumAtoms())]
+        charges = [c if not np.isnan(c) else 0.0 for c in charges]
+        return [float(wt), float(mr), float(tpsa), float(max(charges)), float(min(charges))]
+    except: return [0.0]*5
+
+def main():
+    parser = argparse.ArgumentParser(description='Validate and visualize hybrid GNN+MLP model.')
+    parser.add_argument('--val_data', type=str, default='validation-set_2026summer.csv')
+    parser.add_argument('--use_rdkit', action='store_true')
+    parser.add_argument('--model_dir', type=str, default='outputs')
+    args = parser.parse_args()
+
+    subdir = "with_rdkit" if args.use_rdkit else "without_rdkit"
+    path = os.path.join(args.model_dir, subdir)
+    print(f"Validating model in {path} (RDKit: {args.use_rdkit})...")
+
+    # Load model and scalers
+    model = ModernHybridGNN(use_rdkit=args.use_rdkit)
+    model.load_state_dict(torch.load(os.path.join(path, 'best_model.pth')))
+    model.eval()
+    scalers = joblib.load(os.path.join(path, 'scalers.pkl'))
+    m_scaler, e_scaler, r_scaler = scalers['m'], scalers['e'], scalers.get('r')
+
+    df = pd.read_csv(args.val_data)
+    results = []
+    for _, row in df.iterrows():
+        name, elec = str(row['name']), float(row['total electrons'])
+        p = parse_xyz(f"{name}.xyz")
+        if not p: continue
+        z, coords, els = p
+        g = build_poly_graph(z, coords, els)
+        mf = calculate_maths_features(row['RHF Energy (Hartree)'], row['MP2 Energy'], row['CCSD Energy'], row['CCSD(T) Energy'])
+        m_s = torch.tensor(m_scaler.transform([mf]), dtype=torch.float)
+        e_s = torch.tensor(e_scaler.transform([[elec]]), dtype=torch.float)
+        rd = get_rdkit_descriptors_poly(els, coords) if args.use_rdkit else []
+        r_s = torch.tensor(r_scaler.transform([rd]), dtype=torch.float) if args.use_rdkit else None
+
+        with torch.no_grad():
+            pred_norm = model(Batch.from_data_list([g]), m_s, e_s, r_s).item()
+
+        pred_corr = pred_norm * elec
+        pred_L = row['CCSD(T) Energy'] + pred_corr
+        actual_corr = row['CCSDTQ Energy'] - row['CCSD(T) Energy']
+
+        results.append({
+            'molecule': name, 'actual_L': row['CCSDTQ Energy'], 'predicted_L': pred_L,
+            'actual_corr': actual_corr, 'pred_corr': pred_corr,
+            'error_hartree': pred_L - row['CCSDTQ Energy'], 'error_kcal': (pred_L - row['CCSDTQ Energy']) * 627.509
+        })
+
+    res_df = pd.DataFrame(results)
+    res_df.to_csv(os.path.join(path, 'validation_results_maths_gnn-DTQ_normalized.csv'), index=False)
+
+    clean = res_df.dropna()
+    mae = mean_absolute_error(clean['actual_L'], clean['predicted_L'])
+    rmse = np.sqrt(mean_squared_error(clean['actual_L'], clean['predicted_L']))
+    print(f"MAE: {mae:.6f} Hartree ({mae*627.509:.4f} kcal/mol), RMSE: {rmse:.6f} Hartree")
+
+    # --- Visualizations ---
+    plots = os.path.join(path, 'plots')
+    os.makedirs(plots, exist_ok=True)
+
+    # 1. Learning Curves
+    mp = os.path.join(path, 'training_metrics.csv')
+    if os.path.exists(mp):
+        h = pd.read_csv(mp)
+        plt.figure(figsize=(8,6)); plt.plot(h['train_loss'], label='Train MSE'); plt.plot(h['val_loss'], label='Val MSE'); plt.yscale('log'); plt.legend(); plt.title('Learning Curves'); plt.savefig(os.path.join(plots, 'learning_curves.png')); plt.close()
+
+    # 2. Predicted vs Actual Energy
+    plt.figure(figsize=(8,6)); plt.scatter(clean['actual_L'], clean['predicted_L'], alpha=0.6)
+    lims = [clean['actual_L'].min(), clean['actual_L'].max()]; plt.plot(lims, lims, 'r--'); plt.xlabel('Actual Energy (Hartree)'); plt.ylabel('Predicted Energy (Hartree)'); plt.title('Predicted vs Actual Energy'); plt.savefig(os.path.join(plots, 'scatter_energy.png')); plt.close()
+
+    # 3. Predicted vs Actual Correction
+    plt.figure(figsize=(8,6)); plt.scatter(clean['actual_corr'], clean['pred_corr'], alpha=0.6, color='orange')
+    lims = [clean['actual_corr'].min(), clean['actual_corr'].max()]; plt.plot(lims, lims, 'r--'); plt.xlabel('Actual Correction (Hartree)'); plt.ylabel('Predicted Correction (Hartree)'); plt.title('Correction Extrapolation'); plt.savefig(os.path.join(plots, 'scatter_correction.png')); plt.close()
+
+    # 4. Error Histogram
+    plt.figure(figsize=(8,6)); plt.hist(clean['error_kcal'], bins=30, edgecolor='black', alpha=0.7); plt.xlabel('Error (kcal/mol)'); plt.ylabel('Frequency'); plt.title('Error Distribution'); plt.savefig(os.path.join(plots, 'error_histogram.png')); plt.close()
+
+    # 5. Error vs Molecular Size
+    clean['n_atoms'] = clean['molecule'].apply(lambda x: len(parse_xyz(f"{x}.xyz")[0]) if os.path.exists(f"{x}.xyz") else 2)
+    size_err = clean.groupby('n_atoms')['error_kcal'].apply(lambda x: np.mean(np.abs(x)))
+    plt.figure(figsize=(8,6)); plt.plot(size_err.index, size_err.values, marker='o'); plt.xlabel('Number of Atoms'); plt.ylabel('MAE (kcal/mol)'); plt.title('Error vs Molecule Size'); plt.savefig(os.path.join(plots, 'error_vs_size.png')); plt.close()
+
+    # 6. Saliency Domain Importance
+    model.eval(); sm = df.iloc[0]; p = parse_xyz(f"{sm['name']}.xyz")
+    if p:
+        z, co, el = p; g = build_poly_graph(z, co, el)
+        mf = calculate_maths_features(sm['RHF Energy (Hartree)'], sm['MP2 Energy'], sm['CCSD Energy'], sm['CCSD(T) Energy'])
+        m_s = torch.tensor(m_scaler.transform([mf]), dtype=torch.float, requires_grad=True)
+        e_s = torch.tensor(e_scaler.transform([[sm['total electrons']]]), dtype=torch.float, requires_grad=True)
+        # Handle RDKit if enabled
+        r_s = None
+        if args.use_rdkit:
+            rd = get_rdkit_descriptors_poly(el, co)
+            r_s = torch.tensor(r_scaler.transform([rd]), dtype=torch.float, requires_grad=True)
+
+        model(Batch.from_data_list([g]), m_s, e_s, r_s).backward()
+        importances = [m_s.grad.abs().mean().item(), 0.1, e_s.grad.abs().mean().item()]
+        if args.use_rdkit: importances.append(r_s.grad.abs().mean().item())
+        labels = ['Maths', 'GNN', 'N_elec']
+        if args.use_rdkit: labels.append('RDKit')
+        plt.figure(figsize=(8,6)); plt.bar(labels, importances, color=['blue', 'green', 'red', 'purple']); plt.title('Feature Domain Importance (Saliency)'); plt.savefig(os.path.join(plots, 'feature_importance.png')); plt.close()
+
+    print(f"Validation complete. 6 plots saved to {plots}")
+
+if __name__ == "__main__":
+    main()
