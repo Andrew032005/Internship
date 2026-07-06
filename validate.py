@@ -12,6 +12,14 @@ os.environ["MKL_NUM_THREADS"] = "1"
 os.environ["OPENBLAS_NUM_THREADS"] = "1"
 os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
 os.environ["NUMEXPR_NUM_THREADS"] = "1"
+os.environ["MKL_ENABLE_INSTRUCTIONS"] = "SSE4_2"
+os.environ["DNNL_MAX_CPU_ISA"] = "SSE42"
+os.environ["MKL_DEBUG_CPU_TYPE"] = "5"
+os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+
+# Import RDKit before Torch
+from rdkit import Chem
+from rdkit.Chem import Descriptors, rdDetermineBonds
 
 import torch
 import torch.nn as nn
@@ -20,13 +28,13 @@ from torch_geometric.nn import GCNConv, global_mean_pool
 from torch_geometric.data import Data, Batch
 from torch_geometric.loader import DataLoader
 
-# Setup PyTorch threads
+# Setup PyTorch
 torch.set_num_threads(1)
 torch.backends.cudnn.deterministic = True
+if hasattr(torch.backends, 'mkldnn'):
+    torch.backends.mkldnn.enabled = False
 
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
-from rdkit import Chem
-from rdkit.Chem import Descriptors, rdDetermineBonds
 
 # --- Model Definition (Must match train.py) ---
 class ModernHybridGNN(nn.Module):
@@ -63,7 +71,7 @@ class ModernHybridGNN(nn.Module):
             combined = torch.cat([gnn_emb, math_feats, n_elec], dim=1)
         return self.mlp(combined)
 
-# --- Preprocessing Functions ---
+# --- Helper Functions ---
 def parse_xyz(filepath):
     if not os.path.exists(filepath): return None
     with open(filepath, 'r') as f: lines = f.readlines()
@@ -122,7 +130,7 @@ def get_rdkit_descriptors_poly(els, coords):
     except: return [0.0]*5
 
 def main():
-    parser = argparse.ArgumentParser(description='Validate and visualize hybrid GNN+MLP model.')
+    parser = argparse.ArgumentParser()
     parser.add_argument('--val_data', type=str, default='validation-set_2026summer.csv')
     parser.add_argument('--use_rdkit', action='store_true')
     parser.add_argument('--model_dir', type=str, default='outputs')
@@ -130,9 +138,10 @@ def main():
 
     subdir = "with_rdkit" if args.use_rdkit else "without_rdkit"
     path = os.path.join(args.model_dir, subdir)
-    print(f"Validating model in {path} (RDKit: {args.use_rdkit})...")
+    if not os.path.exists(os.path.join(path, 'best_model.pth')):
+        print(f"Error: Model not found in {path}. Run train.py first.")
+        return
 
-    # Load model and scalers
     model = ModernHybridGNN(use_rdkit=args.use_rdkit)
     model.load_state_dict(torch.load(os.path.join(path, 'best_model.pth')))
     model.eval()
@@ -163,64 +172,47 @@ def main():
         results.append({
             'molecule': name, 'actual_L': row['CCSDTQ Energy'], 'predicted_L': pred_L,
             'actual_corr': actual_corr, 'pred_corr': pred_corr,
-            'error_hartree': pred_L - row['CCSDTQ Energy'], 'error_kcal': (pred_L - row['CCSDTQ Energy']) * 627.509
+            'error_kcal': (pred_L - row['CCSDTQ Energy']) * 627.509
         })
 
     res_df = pd.DataFrame(results)
     res_df.to_csv(os.path.join(path, 'validation_results_maths_gnn-DTQ_normalized.csv'), index=False)
-
     clean = res_df.dropna()
-    mae = mean_absolute_error(clean['actual_L'], clean['predicted_L'])
-    rmse = np.sqrt(mean_squared_error(clean['actual_L'], clean['predicted_L']))
-    print(f"MAE: {mae:.6f} Hartree ({mae*627.509:.4f} kcal/mol), RMSE: {rmse:.6f} Hartree")
+    print(f"MAE: {mean_absolute_error(clean['actual_L'], clean['predicted_L']):.6f} Hartree")
 
     # --- Visualizations ---
-    plots = os.path.join(path, 'plots')
-    os.makedirs(plots, exist_ok=True)
-
-    # 1. Learning Curves
+    plots = os.path.join(path, 'plots'); os.makedirs(plots, exist_ok=True)
     mp = os.path.join(path, 'training_metrics.csv')
     if os.path.exists(mp):
         h = pd.read_csv(mp)
         plt.figure(figsize=(8,6)); plt.plot(h['train_loss'], label='Train MSE'); plt.plot(h['val_loss'], label='Val MSE'); plt.yscale('log'); plt.legend(); plt.title('Learning Curves'); plt.savefig(os.path.join(plots, 'learning_curves.png')); plt.close()
 
-    # 2. Predicted vs Actual Energy
-    plt.figure(figsize=(8,6)); plt.scatter(clean['actual_L'], clean['predicted_L'], alpha=0.6)
-    lims = [clean['actual_L'].min(), clean['actual_L'].max()]; plt.plot(lims, lims, 'r--'); plt.xlabel('Actual Energy (Hartree)'); plt.ylabel('Predicted Energy (Hartree)'); plt.title('Predicted vs Actual Energy'); plt.savefig(os.path.join(plots, 'scatter_energy.png')); plt.close()
+    plt.figure(figsize=(8,6)); plt.scatter(clean['actual_L'], clean['predicted_L'], alpha=0.6); lims = [clean['actual_L'].min(), clean['actual_L'].max()]; plt.plot(lims, lims, 'r--'); plt.xlabel('Actual Energy'); plt.ylabel('Predicted'); plt.savefig(os.path.join(plots, 'scatter_energy.png')); plt.close()
+    plt.figure(figsize=(8,6)); plt.scatter(clean['actual_corr'], clean['pred_corr'], alpha=0.6, color='orange'); lims = [clean['actual_corr'].min(), clean['actual_corr'].max()]; plt.plot(lims, lims, 'r--'); plt.xlabel('Actual Correction'); plt.ylabel('Predicted Correction'); plt.savefig(os.path.join(plots, 'scatter_correction.png')); plt.close()
+    plt.figure(figsize=(8,6)); plt.hist(clean['error_kcal'], bins=30); plt.xlabel('Error (kcal/mol)'); plt.savefig(os.path.join(plots, 'error_histogram.png')); plt.close()
 
-    # 3. Predicted vs Actual Correction
-    plt.figure(figsize=(8,6)); plt.scatter(clean['actual_corr'], clean['pred_corr'], alpha=0.6, color='orange')
-    lims = [clean['actual_corr'].min(), clean['actual_corr'].max()]; plt.plot(lims, lims, 'r--'); plt.xlabel('Actual Correction (Hartree)'); plt.ylabel('Predicted Correction (Hartree)'); plt.title('Correction Extrapolation'); plt.savefig(os.path.join(plots, 'scatter_correction.png')); plt.close()
-
-    # 4. Error Histogram
-    plt.figure(figsize=(8,6)); plt.hist(clean['error_kcal'], bins=30, edgecolor='black', alpha=0.7); plt.xlabel('Error (kcal/mol)'); plt.ylabel('Frequency'); plt.title('Error Distribution'); plt.savefig(os.path.join(plots, 'error_histogram.png')); plt.close()
-
-    # 5. Error vs Molecular Size
     clean['n_atoms'] = clean['molecule'].apply(lambda x: len(parse_xyz(f"{x}.xyz")[0]) if os.path.exists(f"{x}.xyz") else 2)
-    size_err = clean.groupby('n_atoms')['error_kcal'].apply(lambda x: np.mean(np.abs(x)))
-    plt.figure(figsize=(8,6)); plt.plot(size_err.index, size_err.values, marker='o'); plt.xlabel('Number of Atoms'); plt.ylabel('MAE (kcal/mol)'); plt.title('Error vs Molecule Size'); plt.savefig(os.path.join(plots, 'error_vs_size.png')); plt.close()
+    s_err = clean.groupby('n_atoms')['error_kcal'].apply(lambda x: np.mean(np.abs(x)))
+    plt.figure(figsize=(8,6)); plt.plot(s_err.index, s_err.values, marker='o'); plt.xlabel('Atoms'); plt.ylabel('MAE (kcal/mol)'); plt.savefig(os.path.join(plots, 'error_vs_size.png')); plt.close()
 
-    # 6. Saliency Domain Importance
+    # Saliency
     model.eval(); sm = df.iloc[0]; p = parse_xyz(f"{sm['name']}.xyz")
     if p:
-        z, co, el = p; g = build_poly_graph(z, co, el)
-        mf = calculate_maths_features(sm['RHF Energy (Hartree)'], sm['MP2 Energy'], sm['CCSD Energy'], sm['CCSD(T) Energy'])
+        z, co, el = p; g = build_poly_graph(z, co, el); mf = calculate_maths_features(sm['RHF Energy (Hartree)'], sm['MP2 Energy'], sm['CCSD Energy'], sm['CCSD(T) Energy'])
         m_s = torch.tensor(m_scaler.transform([mf]), dtype=torch.float, requires_grad=True)
         e_s = torch.tensor(e_scaler.transform([[sm['total electrons']]]), dtype=torch.float, requires_grad=True)
-        # Handle RDKit if enabled
         r_s = None
         if args.use_rdkit:
             rd = get_rdkit_descriptors_poly(el, co)
             r_s = torch.tensor(r_scaler.transform([rd]), dtype=torch.float, requires_grad=True)
-
         model(Batch.from_data_list([g]), m_s, e_s, r_s).backward()
-        importances = [m_s.grad.abs().mean().item(), 0.1, e_s.grad.abs().mean().item()]
-        if args.use_rdkit: importances.append(r_s.grad.abs().mean().item())
+        imps = [m_s.grad.abs().mean().item(), 0.1, e_s.grad.abs().mean().item()]
+        if args.use_rdkit: imps.append(r_s.grad.abs().mean().item())
         labels = ['Maths', 'GNN', 'N_elec']
         if args.use_rdkit: labels.append('RDKit')
-        plt.figure(figsize=(8,6)); plt.bar(labels, importances, color=['blue', 'green', 'red', 'purple']); plt.title('Feature Domain Importance (Saliency)'); plt.savefig(os.path.join(plots, 'feature_importance.png')); plt.close()
+        plt.figure(figsize=(8,6)); plt.bar(labels, imps, color=['blue', 'green', 'red', 'purple']); plt.title('Saliency'); plt.savefig(os.path.join(plots, 'feature_importance.png')); plt.close()
 
-    print(f"Validation complete. 6 plots saved to {plots}")
+    print(f"Validation complete. Plots in {plots}")
 
 if __name__ == "__main__":
     main()

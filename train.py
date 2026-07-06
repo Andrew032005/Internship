@@ -13,6 +13,14 @@ os.environ["MKL_NUM_THREADS"] = "1"
 os.environ["OPENBLAS_NUM_THREADS"] = "1"
 os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
 os.environ["NUMEXPR_NUM_THREADS"] = "1"
+os.environ["MKL_ENABLE_INSTRUCTIONS"] = "SSE4_2"
+os.environ["DNNL_MAX_CPU_ISA"] = "SSE42"
+os.environ["MKL_DEBUG_CPU_TYPE"] = "5"
+os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+
+# Import RDKit before Torch to avoid potential clashes in MKL/OpenBLAS initialization
+from rdkit import Chem
+from rdkit.Chem import Descriptors, rdDetermineBonds
 
 import torch
 import torch.nn as nn
@@ -21,19 +29,18 @@ from torch_geometric.nn import GCNConv, global_mean_pool
 from torch_geometric.data import Data
 from torch_geometric.loader import DataLoader
 
-# Setup PyTorch threads
+# Setup PyTorch threads and reproducibility
 torch.set_num_threads(1)
 torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
+if hasattr(torch.backends, 'mkldnn'):
+    torch.backends.mkldnn.enabled = False
 
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
-from rdkit import Chem
-from rdkit.Chem import Descriptors, rdDetermineBonds
 
-# --- Model Definition (Embedded) ---
+# --- Model Definition ---
 class ModernHybridGNN(nn.Module):
-    """Modern Hybrid GNN + MLP model for energy extrapolation"""
     def __init__(self, node_in_feats=3, gnn_hidden_dim=32, gnn_out_feats=16,
                  math_feats_dim=12, rdkit_feats_dim=5, use_rdkit=False,
                  mlp_hidden_dims=[128, 64, 32], dropout=0.15):
@@ -51,7 +58,7 @@ class ModernHybridGNN(nn.Module):
         if use_rdkit:
             input_dim += rdkit_feats_dim
 
-        # Modern MLP with BatchNorm and Dropout
+        # Modern MLP
         layers = []
         curr_dim = input_dim
         for h_dim in mlp_hidden_dims:
@@ -66,18 +73,14 @@ class ModernHybridGNN(nn.Module):
 
     def forward(self, data, math_feats, n_elec, rdkit_feats=None):
         x, edge_index, batch = data.x, data.edge_index, data.batch
-
-        # GNN Processing
         x = F.silu(self.bn1(self.conv1(x, edge_index)))
         x = F.silu(self.bn2(self.conv2(x, edge_index)))
         gnn_emb = global_mean_pool(x, batch)
 
-        # Feature Concatenation
         if self.use_rdkit and rdkit_feats is not None:
             combined = torch.cat([gnn_emb, math_feats, n_elec, rdkit_feats], dim=1)
         else:
             combined = torch.cat([gnn_emb, math_feats, n_elec], dim=1)
-
         return self.mlp(combined)
 
 # --- Helper Functions ---
@@ -124,37 +127,30 @@ def get_rdkit_descriptors_dimer(name, bond_length):
     atom_symbols = re.findall('[A-Z][a-z]?', name)
     if not atom_symbols: return [0.0]*5
     if len(atom_symbols) == 1:
-        if bond_length > 0:
-            atom_symbols = [atom_symbols[0], atom_symbols[0]]
-            xyz = f"2\n\n{atom_symbols[0]} 0.0 0.0 0.0\n{atom_symbols[1]} 0.0 0.0 {bond_length:.10f}\n"
-        else:
-            xyz = f"1\n\n{atom_symbols[0]} 0.0 0.0 0.0\n"
-    else:
+        if bond_length > 0: atom_symbols = [atom_symbols[0], atom_symbols[0]]
+        else: xyz = f"1\n\n{atom_symbols[0]} 0.0 0.0 0.0\n"
+    if len(atom_symbols) > 1:
         xyz = f"2\n\n{atom_symbols[0]} 0.0 0.0 0.0\n{atom_symbols[1]} 0.0 0.0 {bond_length:.10f}\n"
 
     mol = Chem.MolFromXYZBlock(xyz)
     if not mol: return [0.0]*5
     try:
-        if mol.GetNumAtoms() > 1:
-            rdDetermineBonds.DetermineBonds(mol)
+        if mol.GetNumAtoms() > 1: rdDetermineBonds.DetermineBonds(mol)
         Chem.SanitizeMol(mol)
         wt = Descriptors.MolWt(mol)
         mr = Descriptors.MolMR(mol)
         tpsa = Descriptors.TPSA(mol)
         Chem.rdPartialCharges.ComputeGasteigerCharges(mol)
         charges = [mol.GetAtomWithIdx(i).GetDoubleProp('_GasteigerCharge') for i in range(mol.GetNumAtoms())]
-        # Filter out nans in charges
         charges = [c if not np.isnan(c) else 0.0 for c in charges]
-        max_q = max(charges) if charges else 0.0
-        min_q = min(charges) if charges else 0.0
-        res = [float(wt), float(mr), float(tpsa), float(max_q), float(min_q)]
+        res = [float(wt), float(mr), float(tpsa), float(max(charges)), float(min(charges))]
         return [v if (v != 0.0 and not np.isnan(v)) else -1.0 for v in res]
     except: return [0.0]*5
 
 def main():
-    parser = argparse.ArgumentParser(description='Train modern hybrid GNN+MLP model.')
+    parser = argparse.ArgumentParser(description='Train modern hybrid GNN+MLP model for CCSDTQ extrapolation.')
     parser.add_argument('--train_data', type=str, default='training-set_2026summer.csv')
-    parser.add_argument('--use_rdkit', action='store_true', help='Toggle RDKit descriptors')
+    parser.add_argument('--use_rdkit', action='store_true', help='Enable RDKit descriptors')
     parser.add_argument('--epochs', type=int, default=500)
     parser.add_argument('--batch_size', type=int, default=64)
     parser.add_argument('--lr', type=float, default=1e-3)
@@ -166,7 +162,7 @@ def main():
     out_path = os.path.join(args.output_dir, subdir)
     os.makedirs(out_path, exist_ok=True)
 
-    print(f"Processing data from {args.train_data} (RDKit: {args.use_rdkit})...")
+    print(f"Loading data from {args.train_data} (RDKit: {args.use_rdkit})...")
     df = pd.read_csv(args.train_data)
     processed = []
     for _, row in df.iterrows():
@@ -179,14 +175,9 @@ def main():
         processed.append({'g': g, 'mf': mf, 'elec': [elec], 'y': [target], 'rd': rd})
 
     train_data_list, val_data_list = train_test_split(processed, test_size=0.2, random_state=42)
-
     m_scaler = StandardScaler().fit([d['mf'] for d in train_data_list])
     e_scaler = StandardScaler().fit([d['elec'] for d in train_data_list])
-    r_scaler = None
-    if args.use_rdkit:
-        # Check for NaNs and replace
-        rds = np.nan_to_num([d['rd'] for d in train_data_list])
-        r_scaler = StandardScaler().fit(rds)
+    r_scaler = StandardScaler().fit(np.nan_to_num([d['rd'] for d in train_data_list])) if args.use_rdkit else None
 
     def prep_pyg(data_list, m_s, e_s, r_s=None):
         out = []
@@ -194,9 +185,7 @@ def main():
             g = d['g'].clone()
             g.mf = torch.tensor(m_s.transform([d['mf']]), dtype=torch.float)
             g.elec = torch.tensor(e_s.transform([d['elec']]), dtype=torch.float)
-            if r_s:
-                rd_clean = np.nan_to_num([d['rd']])
-                g.rd = torch.tensor(r_s.transform(rd_clean), dtype=torch.float)
+            if r_s: g.rd = torch.tensor(r_s.transform(np.nan_to_num([d['rd']])), dtype=torch.float)
             g.y = torch.tensor(d['y'], dtype=torch.float)
             out.append(g)
         return out
@@ -237,11 +226,10 @@ def main():
         if v_l_avg < best_val_loss:
             best_val_loss = v_l_avg
             torch.save(model.state_dict(), os.path.join(out_path, 'best_model.pth'))
-            torch.save(model.state_dict(), os.path.join(out_path, 'best_model_Maths_GNN_features_normalized.pth'))
 
         if (epoch+1)%50==0: print(f"Epoch {epoch+1}: Val MSE {v_l_avg:.9f}, Val MAE {v_m_avg:.9f}")
 
-    # --- Save Output Files ---
+    # --- Save Outputs ---
     pd.DataFrame(history).to_csv(os.path.join(out_path, 'training_metrics.csv'), index=False)
     df_feat = df.copy()
     df_feat['Target_normalized'] = (df['CCSDTQ Energy'] - df['CCSDT Energy']) / df['total electrons']
@@ -249,9 +237,7 @@ def main():
 
     torch.save(model.state_dict(), os.path.join(out_path, 'Final_model_Maths_GNN_features_normalized.pth'))
     torch.save(model.state_dict(), os.path.join(out_path, 'gnn_model_weights.pth'))
-
-    scalers = {'m': m_scaler, 'e': e_scaler, 'r': r_scaler}
-    joblib.dump(scalers, os.path.join(out_path, 'scalers.pkl'))
+    joblib.dump({'m': m_scaler, 'e': e_scaler, 'r': r_scaler}, os.path.join(out_path, 'scalers.pkl'))
     joblib.dump(m_scaler, os.path.join(out_path, 'maths_scaler.pkl'))
     joblib.dump(e_scaler, os.path.join(out_path, 'electron_scaler.pkl'))
     if args.use_rdkit: joblib.dump(r_scaler, os.path.join(out_path, 'rdkit_scaler.pkl'))
@@ -259,8 +245,7 @@ def main():
 
     with open(os.path.join(out_path, 'random_seed_info.json'), 'w') as f:
         json.dump({'random_seed': 42, 'numpy_seed': 42, 'torch_seed': 42, 'tensorflow_seed': 42}, f)
-
-    print(f"Training complete. All outputs saved to {out_path}")
+    print(f"Training complete. Outputs saved to {out_path}")
 
 if __name__ == "__main__":
     main()
