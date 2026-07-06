@@ -16,6 +16,7 @@ os.environ["NUMEXPR_NUM_THREADS"] = "1"
 os.environ["MKL_ENABLE_INSTRUCTIONS"] = "SSE4_2"
 os.environ["DNNL_MAX_CPU_ISA"] = "SSE42"
 os.environ["MKL_DEBUG_CPU_TYPE"] = "5"
+os.environ["MKL_CBWR"] = "COMPATIBLE"
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
 # Import RDKit before Torch to avoid potential clashes in MKL/OpenBLAS initialization
@@ -194,7 +195,8 @@ def main():
     v_loader = DataLoader(prep_pyg(val_data_list, m_scaler, e_scaler, r_scaler), batch_size=args.batch_size)
 
     model = ModernHybridGNN(use_rdkit=args.use_rdkit)
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+    # Added weight_decay for L2 regularization
+    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=1e-4)
     criterion = nn.MSELoss()
 
     best_val_loss = 1e10
@@ -248,4 +250,14 @@ def main():
     print(f"Training complete. Outputs saved to {out_path}")
 
 if __name__ == "__main__":
-    main()
+    import sys
+    # Create an output log file to capture errors and logs
+    with open('train.out', 'w') as f:
+        sys.stdout = f
+        sys.stderr = f
+        try:
+            main()
+        except Exception as e:
+            print(f"\nCRITICAL ERROR: {e}")
+            import traceback
+            traceback.print_exc()

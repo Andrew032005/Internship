@@ -15,6 +15,7 @@ os.environ["NUMEXPR_NUM_THREADS"] = "1"
 os.environ["MKL_ENABLE_INSTRUCTIONS"] = "SSE4_2"
 os.environ["DNNL_MAX_CPU_ISA"] = "SSE42"
 os.environ["MKL_DEBUG_CPU_TYPE"] = "5"
+os.environ["MKL_CBWR"] = "COMPATIBLE"
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
 # Import RDKit before Torch
@@ -215,4 +216,14 @@ def main():
     print(f"Validation complete. Plots in {plots}")
 
 if __name__ == "__main__":
-    main()
+    import sys
+    # Create an output log file to capture errors and logs
+    with open('validate.out', 'w') as f:
+        sys.stdout = f
+        sys.stderr = f
+        try:
+            main()
+        except Exception as e:
+            print(f"\nCRITICAL ERROR: {e}")
+            import traceback
+            traceback.print_exc()
