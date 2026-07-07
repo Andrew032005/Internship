@@ -1,0 +1,839 @@
+================================================================================
+VALIDATION ON MULTI-ATOMIC MOLECULES (WITH NORMALIZED FEATURES)
+================================================================================
+Loading trained models and feature scalers...
+✓ Loaded Final_model_Maths_GNN_features_normalized.keras
+✓ Loaded maths_scaler.pkl
+✓ Loaded gnn_scaler.pkl
+✓ Loaded electron_scaler.pkl
+✓ Loaded GNN model from new format
+✓ All models and scalers loaded successfully
+Reading multi-atomic molecules data from polyatomic_output_final.csv...
+✓ Successfully loaded 25 molecules from CSV
+  Columns used: A (col 3), B (col 5), C (col 6), D (col 7), L (col 10)
+
+Processing 3-O2:
+  Looking for XYZ file: 3-O2.xyz
+  ✓ XYZ file content:
+    2
+    3-O2
+    O 0. 0. 1.216
+    O 0. 0. 0.
+    
+  Atoms: 2 (['O', 'O'])
+  Node features shape: torch.Size([2, 3])
+  Number of edges: 2
+
+Processing 1-O2:
+  Looking for XYZ file: 1-O2.xyz
+  ✓ XYZ file content:
+    2
+    1-O2
+    O           0.0000000000        0.0000000000       -0.6156113991
+    O           0.0000000000        0.0000000000        0.6156113991
+    
+  Atoms: 2 (['O', 'O'])
+  Node features shape: torch.Size([2, 3])
+  Number of edges: 2
+
+Processing 3-CH2:
+  Looking for XYZ file: 3-CH2.xyz
+  ✓ XYZ file content:
+    3
+    CH2 molecule
+    H           0.0000000000       -1.0017192014        0.1479949987
+    H           0.0000000000        1.0017192014        0.1479949987
+    C           0.0000000000        0.0000000000       -0.2959899974
+    
+  Atoms: 3 (['H', 'H', 'C'])
+  Node features shape: torch.Size([3, 3])
+  Number of edges: 4
+
+Processing 1-CH2:
+  Looking for XYZ file: 1-CH2.xyz
+  ✓ XYZ file content:
+    3
+    1-CH2
+    H           0.0000000000       -0.8683832439        0.2405660270
+    H           0.0000000000        0.8683832439        0.2405660270
+    C           0.0000000000        0.0000000000       -0.4811320540
+    
+  Atoms: 3 (['H', 'H', 'C'])
+  Node features shape: torch.Size([3, 3])
+  Number of edges: 4
+
+Processing CH3:
+  Looking for XYZ file: CH3.xyz
+  ✓ XYZ file content:
+    4
+    CH3 molecule
+    C           0.0000000000        0.0000000000        0.0000000000
+    H           0.9480114956       -0.5473346922        0.0000000000
+    H           0.0000000000        1.0946693844        0.0000000000
+    H          -0.9480114956       -0.5473346922        0.0000000000
+    
+  Atoms: 4 (['C', 'H', 'H', 'H'])
+  Node features shape: torch.Size([4, 3])
+  Number of edges: 6
+
+Processing CH4:
+  Looking for XYZ file: CH4.xyz
+  ✓ XYZ file content:
+    5
+    CH4 molecule
+    C           0.0000000000        0.0000000000        0.0000000000
+    H           0.0000000000        0.0000000000        1.1037025024
+    H           0.0000000000       -1.0405806981       -0.3679008349
+    H          -0.9011693196        0.5202903496       -0.3679008338
+    H           0.9011693196        0.5202903496       -0.3679008338
+    
+  Atoms: 5 (['C', 'H', 'H', 'H', 'H'])
+  Node features shape: torch.Size([5, 3])
+  Number of edges: 8
+
+Processing C2H:
+  Looking for XYZ file: C2H.xyz
+  ✓ XYZ file content:
+    3
+    C2H  molecule
+    C          -0.0238811792       -0.7530198671        0.0000000000
+    C           0.0494750792        0.4801840043        0.0000000000
+    H           0.1071165900        1.5589020828        0.0000000000
+    
+  Atoms: 3 (['C', 'C', 'H'])
+  Node features shape: torch.Size([3, 3])
+  Number of edges: 4
+
+Processing H2O:
+  Looking for XYZ file: H2O.xyz
+  ✓ XYZ file content:
+    3
+    H2O molecule
+    O           0.0000000000        0.0000000000       -0.4057756257
+    H           0.0000000000       -0.7504799152        0.2028878129
+    H           0.0000000000        0.7504799152        0.2028878129
+    
+  Atoms: 3 (['O', 'H', 'H'])
+  Node features shape: torch.Size([3, 3])
+  Number of edges: 4
+
+Processing NH2:
+  Looking for XYZ file: NH2.xyz
+  ✓ XYZ file content:
+    3
+    NH2
+    N           0.0000000000        0.0000000000        0.4427408400
+    H           0.0000000000        0.8017446919       -0.2213704200
+    H           0.0000000000       -0.8017446919       -0.2213704200
+    
+  Atoms: 3 (['N', 'H', 'H'])
+  Node features shape: torch.Size([3, 3])
+  Number of edges: 4
+
+Processing NH3:
+  Looking for XYZ file: NH3.xyz
+  ✓ XYZ file content:
+    4
+    NH3
+    N                 -0.00000000   -0.00000000    0.12976793
+    H                  0.00000000    0.93173922   -0.30279184
+    H                 -0.80690983   -0.46586961   -0.30279184
+    H                  0.80690983   -0.46586961   -0.30279184
+    
+  Atoms: 4 (['N', 'H', 'H', 'H'])
+  Node features shape: torch.Size([4, 3])
+  Number of edges: 6
+
+Processing C2H2:
+  Looking for XYZ file: C2H2.xyz
+  ✓ XYZ file content:
+    4
+    C2H2
+    H           0.0000000000        0.0000000000        1.6933336470
+    C           0.0000000000        0.0000000000        0.6143706452
+    C           0.0000000000        0.0000000000       -0.6143706452
+    H           0.0000000000        0.0000000000       -1.6933336470
+    
+  Atoms: 4 (['H', 'C', 'C', 'H'])
+  Node features shape: torch.Size([4, 3])
+  Number of edges: 6
+
+Processing C6H6:
+  Looking for XYZ file: C6H6.xyz
+  ✓ XYZ file content:
+    12
+    C6H6
+    C      0.0000000  1.3967920  0.0000000
+    C      1.2096570  0.6983960  0.0000000
+    C      1.2096570 -0.6983960  0.0000000
+    C      0.0000000 -1.3967920  0.0000000
+    C     -1.2096570 -0.6983960  0.0000000
+    C     -1.2096570  0.6983960  0.0000000
+    H      0.0000000  2.4842120  0.0000000
+    H      2.1513900  1.2421060  0.0000000
+    H      2.1513900 -1.2421060  0.0000000
+    H      0.0000000 -2.4842120  0.0000000
+    H     -2.1513900 -1.2421060  0.0000000
+    H     -2.1513900  1.2421060  0.0000000
+  Atoms: 12 (['C', 'C', 'C', 'C', 'C', 'C', 'H', 'H', 'H', 'H', 'H', 'H'])
+  Node features shape: torch.Size([12, 3])
+  Number of edges: 24
+
+Processing Ba:
+  Looking for XYZ file: Ba.xyz
+  ✓ XYZ file content:
+    1
+    Ba
+    Ba 0. 0. 0.
+  Atoms: 1 (['Ba'])
+  Node features shape: torch.Size([1, 3])
+  Number of edges: 0
+
+Processing Ba:
+  Looking for XYZ file: Ba.xyz
+  ✓ XYZ file content:
+    1
+    Ba
+    Ba 0. 0. 0.
+  Atoms: 1 (['Ba'])
+  Node features shape: torch.Size([1, 3])
+  Number of edges: 0
+
+Processing Ba2:
+  Looking for XYZ file: Ba2.xyz
+  ✓ XYZ file content:
+    2
+    Ba2+
+    Ba 0. 0. 0.
+    Ba 0. 0. 4.78
+    
+  Atoms: 2 (['Ba', 'Ba'])
+  Node features shape: torch.Size([2, 3])
+  Number of edges: 2
+
+Processing Sr2:
+  Looking for XYZ file: Sr2.xyz
+  ✓ XYZ file content:
+    2
+    Sr2+
+    Sr 0. 0. 0.
+    Sr 0. 0. 4.334
+    
+  Atoms: 2 (['Sr', 'Sr'])
+  Node features shape: torch.Size([2, 3])
+  Number of edges: 2
+
+Processing Ca2:
+  Looking for XYZ file: Ca2.xyz
+  ✓ XYZ file content:
+    2
+    Ca2+
+    Ca 0. 0. 0.
+    Ca 0. 0. 3.920
+    
+  Atoms: 2 (['Ca', 'Ca'])
+  Node features shape: torch.Size([2, 3])
+  Number of edges: 2
+
+Processing Mg2:
+  Looking for XYZ file: Mg2.xyz
+  ✓ XYZ file content:
+    2
+    Mg2+
+    Mg 0. 0. 0.
+    Mg 0. 0. 3.052
+    
+  Atoms: 2 (['Mg', 'Mg'])
+  Node features shape: torch.Size([2, 3])
+  Number of edges: 2
+
+Processing Be2:
+  Looking for XYZ file: Be2.xyz
+  ✓ XYZ file content:
+    2
+    Be2+
+    Be 0. 0. 0.
+    Be 0. 0. 2.234
+    
+  Atoms: 2 (['Be', 'Be'])
+  Node features shape: torch.Size([2, 3])
+  Number of edges: 2
+
+Processing TiO2:
+  Looking for XYZ file: TiO2.xyz
+  ✓ XYZ file content:
+    3
+    TiO2
+    Ti                 0.00000000    0.00000000    0.00000000
+    O                  0.00000000    0.00000000    1.65919663
+    O                  1.54022485    0.00000000   -0.61696099
+    
+  Atoms: 3 (['Ti', 'O', 'O'])
+  Node features shape: torch.Size([3, 3])
+  Number of edges: 4
+
+Processing TiO2+:
+  Looking for XYZ file: TiO2+.xyz
+  ✓ XYZ file content:
+    3
+    TiO2+
+    Ti                 0.00000000    0.00000000    0.00000000
+    O                  0.00000000    0.00000000    1.67607698
+    O                  1.67275997    0.00000000   -0.10539507
+    
+  Atoms: 3 (['Ti', 'O', 'O'])
+  Node features shape: torch.Size([3, 3])
+  Number of edges: 4
+
+Processing VCH:
+  Looking for XYZ file: VCH.xyz
+  ✓ XYZ file content:
+    3
+    VCH
+    H                  0.00000000   -0.00000000    2.36009100
+    C                  0.00000000    0.00000000    1.26809100
+    V                 -0.00000000    0.00000000   -0.43341900
+    
+  Atoms: 3 (['H', 'C', 'V'])
+  Node features shape: torch.Size([3, 3])
+  Number of edges: 6
+
+Processing VCH+:
+  Looking for XYZ file: VCH+.xyz
+  ✓ XYZ file content:
+    3
+    VCH+
+    H                 -0.00000000    0.00000000    2.36521167
+    C                 -0.00000000   -0.00000000    1.27421167
+    V                 -0.00000000    0.00000000   -0.43523833
+    
+  Atoms: 3 (['H', 'C', 'V'])
+  Node features shape: torch.Size([3, 3])
+  Number of edges: 6
+
+Processing C6H5CH2:
+  Looking for XYZ file: C6H5CH2.xyz
+  ✓ XYZ file content:
+    14
+    C6H5CH2
+    C          0.0000000000        1.2192114806       -1.1430337630
+    C          0.0000000000        1.2251465978        0.2526824399
+    C          0.0000000000        0.0000000000        0.9949163136
+    C          0.0000000000       -1.2251465978        0.2526824399
+    C          0.0000000000       -1.2192114806       -1.1430337630
+    C          0.0000000000        0.0000000000       -1.8531353439
+    H          0.0000000000        2.1647622293       -1.6873878216
+    H          0.0000000000        2.1722727051        0.7959825566
+    H          0.0000000000       -2.1722727051        0.7959825566
+    H          0.0000000000       -2.1647622293       -1.6873878216
+    H          0.0000000000        0.0000000000       -2.9434960935
+    C          0.0000000000        0.0000000000        2.4112565504
+    H          0.0000000000       -0.9317067325        2.9744938748
+    H          0.0000000000        0.9317067325        2.9744938748
+    
+  Atoms: 14 (['C', 'C', 'C', 'C', 'C', 'C', 'H', 'H', 'H', 'H', 'H', 'C', 'H', 'H'])
+  Node features shape: torch.Size([14, 3])
+  Number of edges: 28
+
+Processing C6H5CH2+:
+  Looking for XYZ file: C6H5CH2+.xyz
+  ✓ XYZ file content:
+    14
+    C6H5CH2+
+    C          0.0000000000        1.2431147947       -1.1276127956
+    C          0.0000000000        1.2532008500        0.2568129914
+    C          0.0000000000        0.0000000000        0.9834695162
+    C          0.0000000000       -1.2532008500        0.2568129914
+    C          0.0000000000       -1.2431147947       -1.1276127956
+    C          0.0000000000        0.0000000000       -1.8114226762
+    H          0.0000000000        2.1738244800       -1.6925901782
+    H          0.0000000000        2.1916112753        0.8132766960
+    H          0.0000000000       -2.1916112753        0.8132766960
+    H          0.0000000000       -2.1738244800       -1.6925901782
+    H          0.0000000000        0.0000000000       -2.9029125398
+    C          0.0000000000        0.0000000000        2.3620473372
+    H          0.0000000000       -0.9306151089        2.9320304677
+    H          0.0000000000        0.9306151089        2.9320304677
+    
+  Atoms: 14 (['C', 'C', 'C', 'C', 'C', 'C', 'H', 'H', 'H', 'H', 'H', 'C', 'H', 'H'])
+  Node features shape: torch.Size([14, 3])
+  Number of edges: 28
+
+Batch processing GNN outputs for 25 molecules...
+Raw GNN outputs: [-3.7194643 -3.7218764 -1.8556023 -1.8614421 -1.9918523 -2.0633738
+ -2.6453514 -2.3608692 -2.1094239 -2.2731876 -2.1026683 -2.560523
+ -4.766877  -4.766877  -5.235514  -5.126579  -5.029634  -5.7737846
+ -2.1728537 -7.11645   -7.1180954 -4.615865  -4.616114  -2.597892
+ -2.5978024]
+Normalized GNN outputs: [-0.24931468 -0.2507323   0.84611326  0.84268105  0.76603645  0.7240019
+  0.38196233  0.54915804  0.6969373   0.6006902   0.70090777  0.43181762
+ -0.8648996  -0.8648996  -1.1403266  -1.0763032  -1.0193268  -1.4566786
+  0.65965843 -2.245789   -2.246756   -0.7761469  -0.7762932   0.40985513
+  0.40990782]
+
+Making predictions with normalized features...
+
+3-O2 feature summary:
+  Maths features (normalized): [ 0.12365796 -0.06091914 -0.23506779]...
+  GNN feature (normalized): -0.249315
+  Electron feature (normalized): 0.374613
+3-O2 (2 atoms):
+  Actual (L-D)/total_electrons: -0.000014
+  Predicted (L-D)/total_electrons: -0.000022
+  Error (L-D)/total_electrons: -0.000008
+  Actual L-D: -0.000227
+  Predicted L-D: -0.000353
+  Error L-D: -0.000127 Hartree (-0.08 kcal/mol)
+  Actual L: -149.987968
+  Predicted L: -149.988094
+  Error L: -0.000127 Hartree (-0.08 kcal/mol)
+
+1-O2 feature summary:
+  Maths features (normalized): [ 0.11077623 -0.50022413 -0.96971692]...
+  GNN feature (normalized): -0.250732
+  Electron feature (normalized): 0.374613
+1-O2 (2 atoms):
+  Actual (L-D)/total_electrons: -0.000039
+  Predicted (L-D)/total_electrons: -0.000274
+  Error (L-D)/total_electrons: -0.000235
+  Actual L-D: -0.000627
+  Predicted L-D: -0.004384
+  Error L-D: -0.003757 Hartree (-2.36 kcal/mol)
+  Actual L: -149.949263
+  Predicted L: -149.953019
+  Error L: -0.003757 Hartree (-2.36 kcal/mol)
+
+3-CH2 feature summary:
+  Maths features (normalized): [0.05553446 0.07532206 0.03961735]...
+  GNN feature (normalized): 0.846113
+  Electron feature (normalized): -0.694177
+3-CH2 (3 atoms):
+  Actual (L-D)/total_electrons: -0.000000
+  Predicted (L-D)/total_electrons: -0.000041
+  Error (L-D)/total_electrons: -0.000041
+  Actual L-D: -0.000003
+  Predicted L-D: -0.000331
+  Error L-D: -0.000328 Hartree (-0.21 kcal/mol)
+  Actual L: -39.042248
+  Predicted L: -39.042576
+  Error L: -0.000328 Hartree (-0.21 kcal/mol)
+
+1-CH2 feature summary:
+  Maths features (normalized): [-0.00618456 -0.20846649 -0.02447902]...
+  GNN feature (normalized): 0.842681
+  Electron feature (normalized): -0.694177
+1-CH2 (3 atoms):
+  Actual (L-D)/total_electrons: -0.000001
+  Predicted (L-D)/total_electrons: -0.000041
+  Error (L-D)/total_electrons: -0.000040
+  Actual L-D: -0.000006
+  Predicted L-D: -0.000325
+  Error L-D: -0.000319 Hartree (-0.20 kcal/mol)
+  Actual L: -39.023487
+  Predicted L: -39.023806
+  Error L: -0.000319 Hartree (-0.20 kcal/mol)
+
+CH3 feature summary:
+  Maths features (normalized): [-0.0439447  -0.09108875  0.01503046]...
+  GNN feature (normalized): 0.766036
+  Electron feature (normalized): -0.560578
+CH3 (4 atoms):
+  Actual (L-D)/total_electrons: -0.000001
+  Predicted (L-D)/total_electrons: -0.000100
+  Error (L-D)/total_electrons: -0.000100
+  Actual L-D: -0.000007
+  Predicted L-D: -0.000904
+  Error L-D: -0.000898 Hartree (-0.56 kcal/mol)
+  Actual L: -39.716857
+  Predicted L: -39.717754
+  Error L: -0.000898 Hartree (-0.56 kcal/mol)
+
+CH4 feature summary:
+  Maths features (normalized): [-1.26730771e-01 -2.84156098e-01 -1.00226262e-04]...
+  GNN feature (normalized): 0.724002
+  Electron feature (normalized): -0.426979
+CH4 (5 atoms):
+  Actual (L-D)/total_electrons: -0.000001
+  Predicted (L-D)/total_electrons: -0.000118
+  Error (L-D)/total_electrons: -0.000117
+  Actual L-D: -0.000011
+  Predicted L-D: -0.001176
+  Error L-D: -0.001166 Hartree (-0.73 kcal/mol)
+  Actual L: -40.388191
+  Predicted L: -40.389357
+  Error L: -0.001166 Hartree (-0.73 kcal/mol)
+
+C2H feature summary:
+  Maths features (normalized): [ 0.02458672 -0.70864478 -0.25167172]...
+  GNN feature (normalized): 0.381962
+  Electron feature (normalized): -0.026183
+C2H (3 atoms):
+  Actual (L-D)/total_electrons: -0.000012
+  Predicted (L-D)/total_electrons: -0.000267
+  Error (L-D)/total_electrons: -0.000255
+  Actual L-D: -0.000155
+  Predicted L-D: -0.003467
+  Error L-D: -0.003312 Hartree (-2.08 kcal/mol)
+  Actual L: -76.403244
+  Predicted L: -76.406556
+  Error L: -0.003312 Hartree (-2.08 kcal/mol)
+
+H2O feature summary:
+  Maths features (normalized): [ 0.08559005  0.17603744 -0.06056554]...
+  GNN feature (normalized): 0.549158
+  Electron feature (normalized): -0.426979
+H2O (3 atoms):
+  Actual (L-D)/total_electrons: -0.000002
+  Predicted (L-D)/total_electrons: -0.000099
+  Error (L-D)/total_electrons: -0.000097
+  Actual L-D: -0.000019
+  Predicted L-D: -0.000987
+  Error L-D: -0.000969 Hartree (-0.61 kcal/mol)
+  Actual L: -76.241955
+  Predicted L: -76.242923
+  Error L: -0.000969 Hartree (-0.61 kcal/mol)
+
+NH2 feature summary:
+  Maths features (normalized): [ 0.05779868  0.07974574 -0.01150483]...
+  GNN feature (normalized): 0.696937
+  Electron feature (normalized): -0.560578
+NH2 (3 atoms):
+  Actual (L-D)/total_electrons: -0.000001
+  Predicted (L-D)/total_electrons: -0.000151
+  Error (L-D)/total_electrons: -0.000150
+  Actual L-D: -0.000011
+  Predicted L-D: -0.001360
+  Error L-D: -0.001350 Hartree (-0.85 kcal/mol)
+  Actual L: -55.733619
+  Predicted L: -55.734968
+  Error L: -0.001350 Hartree (-0.85 kcal/mol)
+
+NH3 feature summary:
+  Maths features (normalized): [-0.01249165 -0.07031443 -0.05370075]...
+  GNN feature (normalized): 0.600690
+  Electron feature (normalized): -0.426979
+NH3 (4 atoms):
+  Actual (L-D)/total_electrons: -0.000002
+  Predicted (L-D)/total_electrons: -0.000262
+  Error (L-D)/total_electrons: -0.000260
+  Actual L-D: -0.000022
+  Predicted L-D: -0.002620
+  Error L-D: -0.002598 Hartree (-1.63 kcal/mol)
+  Actual L: -56.403434
+  Predicted L: -56.406032
+  Error L: -0.002598 Hartree (-1.63 kcal/mol)
+
+C2H2 feature summary:
+  Maths features (normalized): [-0.00839038 -0.68175103 -0.2341343 ]...
+  GNN feature (normalized): 0.700908
+  Electron feature (normalized): 0.107416
+C2H2 (4 atoms):
+  Actual (L-D)/total_electrons: -0.000011
+  Predicted (L-D)/total_electrons: -0.000345
+  Error (L-D)/total_electrons: -0.000334
+  Actual L-D: -0.000152
+  Predicted L-D: -0.004827
+  Error L-D: -0.004676 Hartree (-2.93 kcal/mol)
+  Actual L: -77.112384
+  Predicted L: -77.117060
+  Error L: -0.004676 Hartree (-2.93 kcal/mol)
+
+C6H6 feature summary:
+  Maths features (normalized): [-0.00498609 -0.69054057 -0.1777713 ]...
+  GNN feature (normalized): 0.431818
+  Electron feature (normalized): 3.848181
+C6H6 (12 atoms):
+  Actual (L-D)/total_electrons: -0.000043
+  Predicted (L-D)/total_electrons: -0.000166
+  Error (L-D)/total_electrons: -0.000123
+  Actual L-D: -0.001826
+  Predicted L-D: -0.006981
+  Error L-D: -0.005155 Hartree (-3.23 kcal/mol)
+  Actual L: -231.586019
+  Predicted L: -231.591174
+  Error L: -0.005155 Hartree (-3.23 kcal/mol)
+
+Ba feature summary:
+  Maths features (normalized): [0.29790758 0.50007212 0.09625421]...
+  GNN feature (normalized): -0.864900
+  Electron feature (normalized): -0.426979
+Ba (1 atoms):
+  Actual (L-D)/total_electrons: 0.000000
+  Predicted (L-D)/total_electrons: 0.000111
+  Error (L-D)/total_electrons: +0.000110
+  Actual L-D: 0.000003
+  Predicted L-D: 0.001108
+  Error L-D: +0.001105 Hartree (+0.69 kcal/mol)
+  Actual L: -25.119176
+  Predicted L: -25.118071
+  Error L: +0.001105 Hartree (+0.69 kcal/mol)
+
+Ba feature summary:
+  Maths features (normalized): [0.40979841 0.5000541  0.09625421]...
+  GNN feature (normalized): -0.864900
+  Electron feature (normalized): -0.560578
+Ba (1 atoms):
+  Actual (L-D)/total_electrons: 0.000000
+  Predicted (L-D)/total_electrons: 0.000118
+  Error (L-D)/total_electrons: +0.000118
+  Actual L-D: 0.000002
+  Predicted L-D: 0.001063
+  Error L-D: +0.001061 Hartree (+0.67 kcal/mol)
+  Actual L: -24.937688
+  Predicted L: -24.936627
+  Error L: +0.001061 Hartree (+0.67 kcal/mol)
+
+Ba2 feature summary:
+  Maths features (normalized): [0.32010605 0.21488777 0.09625421]...
+  GNN feature (normalized): -1.140327
+  Electron feature (normalized): 0.775409
+Ba2 (2 atoms):
+  Actual (L-D)/total_electrons: 0.000000
+  Predicted (L-D)/total_electrons: -0.000111
+  Error (L-D)/total_electrons: -0.000111
+  Actual L-D: 0.000003
+  Predicted L-D: -0.002105
+  Error L-D: -0.002108 Hartree (-1.32 kcal/mol)
+  Actual L: -50.096407
+  Predicted L: -50.098515
+  Error L: -0.002108 Hartree (-1.32 kcal/mol)
+
+Sr2 feature summary:
+  Maths features (normalized): [0.3333123  0.29557405 0.09625421]...
+  GNN feature (normalized): -1.076303
+  Electron feature (normalized): 0.775409
+Sr2 (2 atoms):
+  Actual (L-D)/total_electrons: 0.000001
+  Predicted (L-D)/total_electrons: -0.000023
+  Error (L-D)/total_electrons: -0.000024
+  Actual L-D: 0.000010
+  Predicted L-D: -0.000441
+  Error L-D: -0.000452 Hartree (-0.28 kcal/mol)
+  Actual L: -60.573564
+  Predicted L: -60.574016
+  Error L: -0.000452 Hartree (-0.28 kcal/mol)
+
+Ca2 feature summary:
+  Maths features (normalized): [0.34127942 0.32271158 0.09625421]...
+  GNN feature (normalized): -1.019327
+  Electron feature (normalized): 0.775409
+Ca2 (2 atoms):
+  Actual (L-D)/total_electrons: 0.000001
+  Predicted (L-D)/total_electrons: -0.000003
+  Error (L-D)/total_electrons: -0.000004
+  Actual L-D: 0.000012
+  Predicted L-D: -0.000055
+  Error L-D: -0.000067 Hartree (-0.04 kcal/mol)
+  Actual L: -72.777204
+  Predicted L: -72.777271
+  Error L: -0.000067 Hartree (-0.04 kcal/mol)
+
+Mg2 feature summary:
+  Maths features (normalized): [0.39569809 0.47158393 0.09625421]...
+  GNN feature (normalized): -1.456679
+  Electron feature (normalized): 1.309804
+Mg2 (2 atoms):
+  Actual (L-D)/total_electrons: 0.000000
+  Predicted (L-D)/total_electrons: 0.000133
+  Error (L-D)/total_electrons: +0.000133
+  Actual L-D: 0.000000
+  Predicted L-D: 0.003051
+  Error L-D: +0.003050 Hartree (+1.91 kcal/mol)
+  Actual L: -399.068776
+  Predicted L: -399.065726
+  Error L: +0.003050 Hartree (+1.91 kcal/mol)
+
+Be2 feature summary:
+  Maths features (normalized): [ 0.16274463 -0.09205424  0.09625421]...
+  GNN feature (normalized): 0.659658
+  Electron feature (normalized): -0.827776
+Be2 (2 atoms):
+  Actual (L-D)/total_electrons: 0.000000
+  Predicted (L-D)/total_electrons: -0.000210
+  Error (L-D)/total_electrons: -0.000210
+  Actual L-D: 0.000000
+  Predicted L-D: -0.001469
+  Error L-D: -0.001469 Hartree (-0.92 kcal/mol)
+  Actual L: -28.970500
+  Predicted L: -28.971969
+  Error L: -0.001469 Hartree (-0.92 kcal/mol)
+
+TiO2 feature summary:
+  Maths features (normalized): [ 0.34712871  0.13046569 -0.03800609]...
+  GNN feature (normalized): -2.245789
+  Electron feature (normalized): 3.313786
+TiO2 (3 atoms):
+  Actual (L-D)/total_electrons: nan
+  Predicted (L-D)/total_electrons: 0.001733
+  Error (L-D)/total_electrons: +nan
+  Actual L-D: nan
+  Predicted L-D: 0.065861
+  Error L-D: +nan Hartree (+nan kcal/mol)
+  Actual L: nan
+  Predicted L: -998.651669
+  Error L: +nan Hartree (+nan kcal/mol)
+
+TiO2+ feature summary:
+  Maths features (normalized): [ 0.34608242  0.098765   -0.05750611]...
+  GNN feature (normalized): -2.246756
+  Electron feature (normalized): 3.180187
+TiO2+ (3 atoms):
+  Actual (L-D)/total_electrons: nan
+  Predicted (L-D)/total_electrons: 0.001623
+  Error (L-D)/total_electrons: +nan
+  Actual L-D: nan
+  Predicted L-D: 0.060040
+  Error L-D: +nan Hartree (+nan kcal/mol)
+  Actual L: nan
+  Predicted L: -998.322988
+  Error L: +nan Hartree (+nan kcal/mol)
+
+VCH feature summary:
+  Maths features (normalized): [ 0.36520897  0.22385836 -0.01586883]...
+  GNN feature (normalized): -0.776147
+  Electron feature (normalized): 2.244996
+VCH (3 atoms):
+  Actual (L-D)/total_electrons: nan
+  Predicted (L-D)/total_electrons: 0.001128
+  Error (L-D)/total_electrons: +nan
+  Actual L-D: nan
+  Predicted L-D: 0.033849
+  Error L-D: +nan Hartree (+nan kcal/mol)
+  Actual L: nan
+  Predicted L: -981.506971
+  Error L: +nan Hartree (+nan kcal/mol)
+
+VCH+ feature summary:
+  Maths features (normalized): [ 0.3672876   0.25992591 -0.02667359]...
+  GNN feature (normalized): -0.776293
+  Electron feature (normalized): 2.111397
+VCH+ (3 atoms):
+  Actual (L-D)/total_electrons: nan
+  Predicted (L-D)/total_electrons: 0.000330
+  Error (L-D)/total_electrons: +nan
+  Actual L-D: nan
+  Predicted L-D: 0.009563
+  Error L-D: +nan Hartree (+nan kcal/mol)
+  Actual L: nan
+  Predicted L: -981.290894
+  Error L: +nan Hartree (+nan kcal/mol)
+
+C6H5CH2 feature summary:
+  Maths features (normalized): [-0.11814497         nan         nan]...
+  GNN feature (normalized): 0.409855
+  Electron feature (normalized): 4.783372
+C6H5CH2 (14 atoms):
+  Actual (L-D)/total_electrons: nan
+  Predicted (L-D)/total_electrons: nan
+  Error (L-D)/total_electrons: +nan
+  Actual L-D: nan
+  Predicted L-D: nan
+  Error L-D: +nan Hartree (+nan kcal/mol)
+  Actual L: nan
+  Predicted L: nan
+  Error L: +nan Hartree (+nan kcal/mol)
+
+C6H5CH2+ feature summary:
+  Maths features (normalized): [-0.10396551         nan         nan]...
+  GNN feature (normalized): 0.409908
+  Electron feature (normalized): 4.649773
+C6H5CH2+ (14 atoms):
+  Actual (L-D)/total_electrons: nan
+  Predicted (L-D)/total_electrons: nan
+  Error (L-D)/total_electrons: +nan
+  Actual L-D: nan
+  Predicted L-D: nan
+  Error L-D: +nan Hartree (+nan kcal/mol)
+  Actual L: nan
+  Predicted L: nan
+  Error L: +nan Hartree (+nan kcal/mol)
+
+================================================================================
+VALIDATION SUMMARY (WITH NORMALIZED FEATURES)
+================================================================================
+
+Detailed Results:
+molecule  atoms  actual_normalized_target  predicted_normalized_target  error_normalized_target  actual_L_minus_D  predicted_L_minus_D  error_L_minus_D  error_L_minus_D_kcal_mol    actual_L  predicted_L   error_L  error_L_kcal_mol
+    3-O2      2                 -0.000014                    -0.000022                -0.000008         -0.000227            -0.000353        -0.000127                 -0.079517 -149.987968  -149.988094 -0.000127         -0.079517
+    1-O2      2                 -0.000039                    -0.000274                -0.000235         -0.000627            -0.004384        -0.003757                 -2.357400 -149.949263  -149.953019 -0.003757         -2.357400
+   3-CH2      3                 -0.000000                    -0.000041                -0.000041         -0.000003            -0.000331        -0.000328                 -0.205987  -39.042248   -39.042576 -0.000328         -0.205987
+   1-CH2      3                 -0.000001                    -0.000041                -0.000040         -0.000006            -0.000325        -0.000319                 -0.200156  -39.023487   -39.023806 -0.000319         -0.200156
+     CH3      4                 -0.000001                    -0.000100                -0.000100         -0.000007            -0.000904        -0.000898                 -0.563225  -39.716857   -39.717754 -0.000898         -0.563225
+     CH4      5                 -0.000001                    -0.000118                -0.000117         -0.000011            -0.001176        -0.001166                 -0.731532  -40.388191   -40.389357 -0.001166         -0.731532
+     C2H      3                 -0.000012                    -0.000267                -0.000255         -0.000155            -0.003467        -0.003312                 -2.078277  -76.403244   -76.406556 -0.003312         -2.078277
+     H2O      3                 -0.000002                    -0.000099                -0.000097         -0.000019            -0.000987        -0.000969                 -0.607824  -76.241955   -76.242923 -0.000969         -0.607824
+     NH2      3                 -0.000001                    -0.000151                -0.000150         -0.000011            -0.001360        -0.001350                 -0.846832  -55.733619   -55.734968 -0.001350         -0.846832
+     NH3      4                 -0.000002                    -0.000262                -0.000260         -0.000022            -0.002620        -0.002598                 -1.630433  -56.403434   -56.406032 -0.002598         -1.630433
+    C2H2      4                 -0.000011                    -0.000345                -0.000334         -0.000152            -0.004827        -0.004676                 -2.933941  -77.112384   -77.117060 -0.004676         -2.933941
+    C6H6     12                 -0.000043                    -0.000166                -0.000123         -0.001826            -0.006981        -0.005155                 -3.234733 -231.586019  -231.591174 -0.005155         -3.234733
+      Ba      1                 +0.000000                    +0.000111                +0.000110         +0.000003            +0.001108        +0.001105                 +0.693363  -25.119176   -25.118071 +0.001105         +0.693363
+      Ba      1                 +0.000000                    +0.000118                +0.000118         +0.000002            +0.001063        +0.001061                 +0.665851  -24.937688   -24.936627 +0.001061         +0.665851
+     Ba2      2                 +0.000000                    -0.000111                -0.000111         +0.000003            -0.002105        -0.002108                 -1.322783  -50.096407   -50.098515 -0.002108         -1.322783
+     Sr2      2                 +0.000001                    -0.000023                -0.000024         +0.000010            -0.000441        -0.000452                 -0.283325  -60.573564   -60.574016 -0.000452         -0.283325
+     Ca2      2                 +0.000001                    -0.000003                -0.000004         +0.000012            -0.000055        -0.000067                 -0.041970  -72.777204   -72.777271 -0.000067         -0.041970
+     Mg2      2                 +0.000000                    +0.000133                +0.000133         +0.000000            +0.003051        +0.003050                 +1.914211 -399.068776  -399.065726 +0.003050         +1.914211
+     Be2      2                 +0.000000                    -0.000210                -0.000210         +0.000000            -0.001469        -0.001469                 -0.922118  -28.970500   -28.971969 -0.001469         -0.922118
+    TiO2      3                       NaN                    +0.001733                      NaN               NaN            +0.065861              NaN                       NaN         NaN  -998.651669       NaN               NaN
+   TiO2+      3                       NaN                    +0.001623                      NaN               NaN            +0.060040              NaN                       NaN         NaN  -998.322988       NaN               NaN
+     VCH      3                       NaN                    +0.001128                      NaN               NaN            +0.033849              NaN                       NaN         NaN  -981.506971       NaN               NaN
+    VCH+      3                       NaN                    +0.000330                      NaN               NaN            +0.009563              NaN                       NaN         NaN  -981.290894       NaN               NaN
+ C6H5CH2     14                       NaN                          NaN                      NaN               NaN                  NaN              NaN                       NaN         NaN          NaN       NaN               NaN
+C6H5CH2+     14                       NaN                          NaN                      NaN               NaN                  NaN              NaN                       NaN         NaN          NaN       NaN               NaN
+
+Performance Analysis by Atom Count:
+  1 atoms: 2 molecules
+    Average Error (L-D)/total_electrons: +0.000114
+    Average Error L-D: +0.001083 Hartree (+0.68 kcal/mol)
+    Average Error L: +0.001083 Hartree (+0.68 kcal/mol)
+  2 atoms: 7 molecules
+    Average Error (L-D)/total_electrons: -0.000065
+    Average Error L-D: -0.000704 Hartree (-0.44 kcal/mol)
+    Average Error L: -0.000704 Hartree (-0.44 kcal/mol)
+  3 atoms: 9 molecules
+    Average Error (L-D)/total_electrons: -0.000116
+    Average Error L-D: -0.001255 Hartree (-0.79 kcal/mol)
+    Average Error L: -0.001255 Hartree (-0.79 kcal/mol)
+  4 atoms: 3 molecules
+    Average Error (L-D)/total_electrons: -0.000231
+    Average Error L-D: -0.002724 Hartree (-1.71 kcal/mol)
+    Average Error L: -0.002724 Hartree (-1.71 kcal/mol)
+  5 atoms: 1 molecules
+    Average Error (L-D)/total_electrons: -0.000117
+    Average Error L-D: -0.001166 Hartree (-0.73 kcal/mol)
+    Average Error L: -0.001166 Hartree (-0.73 kcal/mol)
+  12 atoms: 1 molecules
+    Average Error (L-D)/total_electrons: -0.000123
+    Average Error L-D: -0.005155 Hartree (-3.23 kcal/mol)
+    Average Error L: -0.005155 Hartree (-3.23 kcal/mol)
+  14 atoms: 2 molecules
+    Average Error (L-D)/total_electrons: +nan
+    Average Error L-D: +nan Hartree (+nan kcal/mol)
+    Average Error L: +nan Hartree (+nan kcal/mol)
+
+Overall Performance:
+  Average Error (L-D)/total_electrons: -0.000092
+  Average Error L-D: -0.001239 Hartree (-0.78 kcal/mol)
+  Average Error L: -0.001239 Hartree (-0.78 kcal/mol)
+
+Performance Interpretation (based on L-D error):
+  ✓ GOOD: Reasonable performance on larger molecules
+
+Feature Information:
+  - Using 14 NORMALIZED features: 12 Maths features + 1 GNN feature + 1 Electron feature
+  - All features are standardized using StandardScaler
+  - Target variable: (L-D)/total_electrons
+  - Model predicts normalized target, then converted back to L-D and L
+
+Model and Normalization Status:
+  - Model type: Non-normalized
+  - Maths features normalized: True
+  - GNN features normalized: True
+  - Electron features normalized: True
+
+Error Bias Analysis:
+  - Positive errors (overestimation): 3 molecules
+  - Negative errors (underestimation): 16 molecules
+  - Zero errors: 0 molecules
+  - Overall bias: Underestimation (-0.001239 Hartree)
+
+✓ Validation results saved to validation_results_maths_gnn-DTQ_normalized.csv
