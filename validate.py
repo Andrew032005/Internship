@@ -151,13 +151,22 @@ def main():
 
     df = pd.read_csv(args.val_data)
     results = []
+
+    log_f = open('validation.log', 'w')
+    log_f.write("Molecule,Actual_L,Predicted_L,Error_kcal\n")
+
     for _, row in df.iterrows():
         name, elec = str(row['name']), float(row['total electrons'])
         p = parse_xyz(f"{name}.xyz")
         if not p: continue
         z, coords, els = p
         g = build_poly_graph(z, coords, els)
-        mf = calculate_maths_features(row['RHF Energy (Hartree)'], row['MP2 Energy'], row['CCSD Energy'], row['CCSD(T) Energy'])
+
+        # New base for prediction is CCSDT (column index 8 or row['CCSDT Energy'])
+        CCSDT = row['CCSDT Energy']
+        CCSDTQ = row['CCSDTQ Energy']
+
+        mf = calculate_maths_features(row['RHF Energy (Hartree)'], row['MP2 Energy'], row['CCSD Energy'], CCSDT)
         m_s = torch.tensor(m_scaler.transform([mf]), dtype=torch.float)
         e_s = torch.tensor(e_scaler.transform([[elec]]), dtype=torch.float)
         rd = get_rdkit_descriptors_poly(els, coords) if args.use_rdkit else []
@@ -166,17 +175,27 @@ def main():
         with torch.no_grad():
             pred_norm = model(Batch.from_data_list([g]), m_s, e_s, r_s).item()
 
+        # Restore CCSDTQ: Predicted_L = CCSDT + pred_norm * elec
         pred_corr = pred_norm * elec
-        pred_L = row['CCSD(T) Energy'] + pred_corr
-        actual_corr = row['CCSDTQ Energy'] - row['CCSD(T) Energy']
+        pred_L = CCSDT + pred_corr
+        actual_corr = CCSDTQ - CCSDT
+
+        error_kcal = (pred_L - CCSDTQ) * 627.509
 
         results.append({
-            'molecule': name, 'actual_L': row['CCSDTQ Energy'], 'predicted_L': pred_L,
+            'molecule': name, 'actual_L': CCSDTQ, 'predicted_L': pred_L,
             'actual_corr': actual_corr, 'pred_corr': pred_corr,
-            'error_kcal': (pred_L - row['CCSDTQ Energy']) * 627.509
+            'error_kcal': error_kcal
         })
 
+        log_f.write(f"{name},{CCSDTQ:.10f},{pred_L:.10f},{error_kcal:.10f}\n")
+
+    log_f.close()
     res_df = pd.DataFrame(results)
+
+    # Save the file in ROOT for supervisor compatibility
+    res_df.to_csv('validation_results_maths_gnn-DTQ_normalized.csv', index=False)
+    # Also save in output path
     res_df.to_csv(os.path.join(path, 'validation_results_maths_gnn-DTQ_normalized.csv'), index=False)
     clean = res_df.dropna()
     print(f"MAE: {mean_absolute_error(clean['actual_L'], clean['predicted_L']):.6f} Hartree")

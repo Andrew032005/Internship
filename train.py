@@ -166,14 +166,27 @@ def main():
     print(f"Loading data from {args.train_data} (RDKit: {args.use_rdkit})...")
     df = pd.read_csv(args.train_data)
     processed = []
+    # Open training.log for writing
+    log_f = open('training.log', 'w')
+    log_f.write("Molecule,Total_Electrons,Target_Normalized\n")
+
     for _, row in df.iterrows():
         name, r1, elec = str(row['name']), float(row['R1']), float(row['total electrons'])
         A, B, C, D, L = row['RHF Energy (Hartree)'], row['MP2 Energy'], row['CCSD Energy'], row['CCSD(T) Energy'], row['CCSDTQ Energy']
+        CCSDT = row['CCSDT Energy']
+
         g = build_graph(name, r1)
         mf = calculate_maths_features(A, B, C, D)
-        target = (L - D) / elec
+
+        # New target: (CCSDTQ - CCSDT) / N_elec
+        target = (L - CCSDT) / elec
         rd = get_rdkit_descriptors_dimer(name, r1) if args.use_rdkit else []
         processed.append({'g': g, 'mf': mf, 'elec': [elec], 'y': [target], 'rd': rd})
+
+        # Write to log
+        log_f.write(f"{name},{elec},{target:.10f}\n")
+
+    log_f.close()
 
     train_data_list, val_data_list = train_test_split(processed, test_size=0.2, random_state=42)
     m_scaler = StandardScaler().fit([d['mf'] for d in train_data_list])
