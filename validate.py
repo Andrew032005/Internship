@@ -182,16 +182,18 @@ def main():
             pred_norm = model(Batch.from_data_list([g]), m_s, e_s, r_s).item()
 
         # Restore CCSDTQ: Predicted_L = CCSDT + pred_norm * elec
-        pred_corr = pred_norm * elec
-        pred_L = CCSDT + pred_corr
-        actual_corr = CCSDTQ - CCSDT
+        # Model outputs normalized correction per electron
+        pred_corr_absolute = pred_norm * elec
+        pred_L = CCSDT + pred_corr_absolute
 
-        error_kcal = (pred_L - CCSDTQ) * 627.509
+        # Calculate Error strictly as difference in physical units
+        actual_corr_absolute = CCSDTQ - CCSDT
+        error_kcal = (pred_corr_absolute - actual_corr_absolute) * 627.509
 
         # Add MAE and RMSE per sample (though RMSE for a single point is just |error|)
         results.append({
             'molecule': name, 'actual_L': CCSDTQ, 'predicted_L': pred_L,
-            'actual_corr': actual_corr, 'pred_corr': pred_corr,
+            'actual_corr': actual_corr_absolute, 'pred_corr': pred_corr_absolute,
             'error_kcal': error_kcal,
             'MAE': abs(pred_L - CCSDTQ),
             'RMSE': np.sqrt((pred_L - CCSDTQ)**2)
@@ -220,7 +222,14 @@ def main():
     import shutil
     if os.path.exists('training.log'): shutil.copy('training.log', os.path.join(path, 'training.log'))
     if os.path.exists('validation.log'): shutil.copy('validation.log', os.path.join(path, 'validation.log'))
-    print(f"MAE: {mean_absolute_error(clean['actual_L'], clean['predicted_L']):.6f} Hartree")
+
+    # Calculate final metrics in kcal/mol for physical interpretation
+    mae_kcal = mean_absolute_error(clean['actual_L'], clean['predicted_L']) * 627.509
+    rmse_kcal = np.sqrt(mean_squared_error(clean['actual_L'], clean['predicted_L'])) * 627.509
+
+    print(f"Final Validation Metrics:")
+    print(f"  MAE: {mae_kcal:.4f} kcal/mol")
+    print(f"  RMSE: {rmse_kcal:.4f} kcal/mol")
 
     # --- Visualizations ---
     plots = os.path.join(path, 'plots'); os.makedirs(plots, exist_ok=True)
