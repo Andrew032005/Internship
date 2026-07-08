@@ -124,6 +124,10 @@ def calculate_maths_features(A, B, C, D, epsilon=1e-8):
            np.tanh(F3/(F1+epsilon)), (F3-F2)/(abs(F1)+epsilon)]
     return np.array(res)
 
+def sanitize_rdkit_descriptors(raw_features):
+    # If error occurred during extraction or value is 0/NaN, replace with -1.0
+    return [float(v) if (v != 0.0 and not np.isnan(v)) else -1.0 for v in raw_features]
+
 def get_rdkit_descriptors_dimer(name, bond_length):
     atom_symbols = re.findall('[A-Z][a-z]?', name)
     if not atom_symbols: return [0.0]*5
@@ -145,7 +149,7 @@ def get_rdkit_descriptors_dimer(name, bond_length):
         charges = [mol.GetAtomWithIdx(i).GetDoubleProp('_GasteigerCharge') for i in range(mol.GetNumAtoms())]
         charges = [c if not np.isnan(c) else 0.0 for c in charges]
         res = [float(wt), float(mr), float(tpsa), float(max(charges)), float(min(charges))]
-        return [v if (v != 0.0 and not np.isnan(v)) else -1.0 for v in res]
+        return sanitize_rdkit_descriptors(res)
     except: return [0.0]*5
 
 def main():

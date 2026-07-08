@@ -115,6 +115,10 @@ def calculate_maths_features(A, B, C, D, epsilon=1e-8):
            np.tanh(F3/(F1+epsilon)), (F3-F2)/(abs(F1)+epsilon)]
     return np.array(res)
 
+def sanitize_rdkit_descriptors(raw_features):
+    # If error occurred during extraction or value is 0/NaN, replace with -1.0
+    return [float(v) if (v != 0.0 and not np.isnan(v)) else -1.0 for v in raw_features]
+
 def get_rdkit_descriptors_poly(els, coords):
     xyz = f"{len(els)}\n\n"
     for el, c in zip(els, coords): xyz += f"{el} {c[0]:.10f} {c[1]:.10f} {c[2]:.10f}\n"
@@ -127,7 +131,8 @@ def get_rdkit_descriptors_poly(els, coords):
         Chem.rdPartialCharges.ComputeGasteigerCharges(mol)
         charges = [mol.GetAtomWithIdx(i).GetDoubleProp('_GasteigerCharge') for i in range(mol.GetNumAtoms())]
         charges = [c if not np.isnan(c) else 0.0 for c in charges]
-        return [float(wt), float(mr), float(tpsa), float(max(charges)), float(min(charges))]
+        res = [float(wt), float(mr), float(tpsa), float(max(charges)), float(min(charges))]
+        return sanitize_rdkit_descriptors(res)
     except: return [0.0]*5
 
 def main():
@@ -166,7 +171,8 @@ def main():
         CCSDT = row['CCSDT Energy']
         CCSDTQ = row['CCSDTQ Energy']
 
-        mf = calculate_maths_features(row['RHF Energy (Hartree)'], row['MP2 Energy'], row['CCSD Energy'], CCSDT)
+        # FIX: Use CCSD(T) as 4th argument D, as in training
+        mf = calculate_maths_features(row['RHF Energy (Hartree)'], row['MP2 Energy'], row['CCSD Energy'], row['CCSD(T) Energy'])
         m_s = torch.tensor(m_scaler.transform([mf]), dtype=torch.float)
         e_s = torch.tensor(e_scaler.transform([[elec]]), dtype=torch.float)
         rd = get_rdkit_descriptors_poly(els, coords) if args.use_rdkit else []
@@ -199,17 +205,21 @@ def main():
     # Global metrics
     clean = res_df.dropna()
 
-    # Bias-Variance decomposition (Simple approach: bias^2 + var)
-    # Since we usually have multiple predictions for the same input to calculate this,
-    # we'll use the residuals across the dataset.
-    mean_pred = clean['predicted_L'].mean()
-    bias = (clean['predicted_L'] - clean['actual_L']).mean()
-    variance = clean['predicted_L'].var()
+    # Bias-Variance decomposition (Corrected approach based on residuals in kcal/mol)
+    errors_kcal = (clean['predicted_L'] - clean['actual_L']) * 627.509
+    bias_kcal = errors_kcal.mean()
+    bias_sq_kcal = bias_kcal ** 2
+    variance_kcal = errors_kcal.var()
 
     # Save the file in ROOT for supervisor compatibility
     res_df.to_csv('validation_results_maths_gnn-DTQ_normalized.csv', index=False)
     # Also save in output path
     res_df.to_csv(os.path.join(path, 'validation_results_maths_gnn-DTQ_normalized.csv'), index=False)
+
+    # Save logs to specific folder as well
+    import shutil
+    if os.path.exists('training.log'): shutil.copy('training.log', os.path.join(path, 'training.log'))
+    if os.path.exists('validation.log'): shutil.copy('validation.log', os.path.join(path, 'validation.log'))
     print(f"MAE: {mean_absolute_error(clean['actual_L'], clean['predicted_L']):.6f} Hartree")
 
     # --- Visualizations ---
@@ -227,11 +237,11 @@ def main():
     s_err = clean.groupby('n_atoms')['error_kcal'].apply(lambda x: np.mean(np.abs(x)))
     plt.figure(figsize=(8,6)); plt.plot(s_err.index, s_err.values, marker='o'); plt.xlabel('Atoms'); plt.ylabel('MAE (kcal/mol)'); plt.title('Error vs Molecule Size'); plt.savefig(os.path.join(plots, 'error_vs_size.png')); plt.close()
 
-    # 5. Bias-Variance Decomposition Histogram
+    # 5. Bias-Variance Decomposition Histogram (Corrected)
     plt.figure(figsize=(8,6))
-    plt.bar(['Bias^2', 'Variance'], [bias**2, variance], color=['salmon', 'lightblue'])
-    plt.ylabel('Value')
-    plt.title('Bias-Variance Decomposition')
+    plt.bar(['Bias^2', 'Variance'], [bias_sq_kcal, variance_kcal], color=['salmon', 'lightblue'])
+    plt.ylabel('Value (kcal/mol)^2')
+    plt.title('Corrected Bias-Variance Decomposition of Prediction Error')
     plt.savefig(os.path.join(plots, 'bias_variance_decomp.png'))
     plt.close()
 
@@ -246,22 +256,38 @@ def main():
     plt.savefig(os.path.join(plots, 'predicted_vs_residuals.png'))
     plt.close()
 
-    # 7. Saliency
+    # 7. Saliency (Corrected for GNN)
     model.eval(); sm = df.iloc[0]; p = parse_xyz(f"{sm['name']}.xyz")
     if p:
-        z, co, el = p; g = build_poly_graph(z, co, el); mf = calculate_maths_features(sm['RHF Energy (Hartree)'], sm['MP2 Energy'], sm['CCSD Energy'], sm['CCSD(T) Energy'])
+        z, co, el = p; g = build_poly_graph(z, co, el)
+        mf = calculate_maths_features(sm['RHF Energy (Hartree)'], sm['MP2 Energy'], sm['CCSD Energy'], sm['CCSD(T) Energy'])
+
         m_s = torch.tensor(m_scaler.transform([mf]), dtype=torch.float, requires_grad=True)
         e_s = torch.tensor(e_scaler.transform([[sm['total electrons']]]), dtype=torch.float, requires_grad=True)
+
         r_s = None
         if args.use_rdkit:
             rd = get_rdkit_descriptors_poly(el, co)
             r_s = torch.tensor(r_scaler.transform([rd]), dtype=torch.float, requires_grad=True)
-        model(Batch.from_data_list([g]), m_s, e_s, r_s).backward()
-        imps = [m_s.grad.abs().mean().item(), 0.1, e_s.grad.abs().mean().item()]
+
+        g_batch = Batch.from_data_list([g])
+        g_batch.x.requires_grad = True
+
+        out = model(g_batch, m_s, e_s, r_s)
+        out.backward()
+
+        gnn_importance = g_batch.x.grad.abs().mean().item() if g_batch.x.grad is not None else 0.0
+
+        imps = [m_s.grad.abs().mean().item(), gnn_importance, e_s.grad.abs().mean().item()]
         if args.use_rdkit: imps.append(r_s.grad.abs().mean().item())
+
         labels = ['Maths', 'GNN', 'N_elec']
         if args.use_rdkit: labels.append('RDKit')
-        plt.figure(figsize=(8,6)); plt.bar(labels, imps, color=['blue', 'green', 'red', 'purple']); plt.title('Saliency'); plt.savefig(os.path.join(plots, 'feature_importance.png')); plt.close()
+        plt.figure(figsize=(8,6))
+        plt.bar(labels, imps, color=['blue', 'green', 'red', 'purple'])
+        plt.title('Corrected Feature Domain Importance (Saliency)')
+        plt.savefig(os.path.join(plots, 'feature_importance.png'))
+        plt.close()
 
     print(f"Validation complete. Plots in {plots}")
 
