@@ -182,10 +182,13 @@ def main():
 
         error_kcal = (pred_L - CCSDTQ) * 627.509
 
+        # Add MAE and RMSE per sample (though RMSE for a single point is just |error|)
         results.append({
             'molecule': name, 'actual_L': CCSDTQ, 'predicted_L': pred_L,
             'actual_corr': actual_corr, 'pred_corr': pred_corr,
-            'error_kcal': error_kcal
+            'error_kcal': error_kcal,
+            'MAE': abs(pred_L - CCSDTQ),
+            'RMSE': np.sqrt((pred_L - CCSDTQ)**2)
         })
 
         log_f.write(f"{name},{CCSDTQ:.10f},{pred_L:.10f},{error_kcal:.10f}\n")
@@ -193,11 +196,20 @@ def main():
     log_f.close()
     res_df = pd.DataFrame(results)
 
+    # Global metrics
+    clean = res_df.dropna()
+
+    # Bias-Variance decomposition (Simple approach: bias^2 + var)
+    # Since we usually have multiple predictions for the same input to calculate this,
+    # we'll use the residuals across the dataset.
+    mean_pred = clean['predicted_L'].mean()
+    bias = (clean['predicted_L'] - clean['actual_L']).mean()
+    variance = clean['predicted_L'].var()
+
     # Save the file in ROOT for supervisor compatibility
     res_df.to_csv('validation_results_maths_gnn-DTQ_normalized.csv', index=False)
     # Also save in output path
     res_df.to_csv(os.path.join(path, 'validation_results_maths_gnn-DTQ_normalized.csv'), index=False)
-    clean = res_df.dropna()
     print(f"MAE: {mean_absolute_error(clean['actual_L'], clean['predicted_L']):.6f} Hartree")
 
     # --- Visualizations ---
@@ -213,9 +225,28 @@ def main():
 
     clean['n_atoms'] = clean['molecule'].apply(lambda x: len(parse_xyz(f"{x}.xyz")[0]) if os.path.exists(f"{x}.xyz") else 2)
     s_err = clean.groupby('n_atoms')['error_kcal'].apply(lambda x: np.mean(np.abs(x)))
-    plt.figure(figsize=(8,6)); plt.plot(s_err.index, s_err.values, marker='o'); plt.xlabel('Atoms'); plt.ylabel('MAE (kcal/mol)'); plt.savefig(os.path.join(plots, 'error_vs_size.png')); plt.close()
+    plt.figure(figsize=(8,6)); plt.plot(s_err.index, s_err.values, marker='o'); plt.xlabel('Atoms'); plt.ylabel('MAE (kcal/mol)'); plt.title('Error vs Molecule Size'); plt.savefig(os.path.join(plots, 'error_vs_size.png')); plt.close()
 
-    # Saliency
+    # 5. Bias-Variance Decomposition Histogram
+    plt.figure(figsize=(8,6))
+    plt.bar(['Bias^2', 'Variance'], [bias**2, variance], color=['salmon', 'lightblue'])
+    plt.ylabel('Value')
+    plt.title('Bias-Variance Decomposition')
+    plt.savefig(os.path.join(plots, 'bias_variance_decomp.png'))
+    plt.close()
+
+    # 6. Predicted vs Residuals
+    residuals = clean['predicted_L'] - clean['actual_L']
+    plt.figure(figsize=(8,6))
+    plt.scatter(clean['predicted_L'], residuals, alpha=0.6, color='green')
+    plt.axhline(y=0, color='r', linestyle='--')
+    plt.xlabel('Predicted Energy (Hartree)')
+    plt.ylabel('Residuals (Hartree)')
+    plt.title('Predicted vs Residuals')
+    plt.savefig(os.path.join(plots, 'predicted_vs_residuals.png'))
+    plt.close()
+
+    # 7. Saliency
     model.eval(); sm = df.iloc[0]; p = parse_xyz(f"{sm['name']}.xyz")
     if p:
         z, co, el = p; g = build_poly_graph(z, co, el); mf = calculate_maths_features(sm['RHF Energy (Hartree)'], sm['MP2 Energy'], sm['CCSD Energy'], sm['CCSD(T) Energy'])
