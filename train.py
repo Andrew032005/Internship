@@ -155,7 +155,7 @@ def get_rdkit_descriptors_dimer(name, bond_length):
 
 def main():
     parser = argparse.ArgumentParser(description='Train modern hybrid GNN+MLP model for CCSDTQ extrapolation.')
-    parser.add_argument('--train_data', type=str, default='training-set_2026summer.csv')
+    parser.add_argument('--train_data', type=str, default='training-set_2026summer_dif.csv')
     parser.add_argument('--use_rdkit', action='store_true', help='Enable RDKit descriptors')
     parser.add_argument('--epochs', type=int, default=500)
     parser.add_argument('--batch_size', type=int, default=64)

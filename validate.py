@@ -180,7 +180,7 @@ def get_rdkit_descriptors_dimer(name, bond_length):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--val_data', type=str, default='validation-set_2026summer.csv')
+    parser.add_argument('--val_data', type=str, default='validation-set_2026summer_dif.csv')
     parser.add_argument('--use_rdkit', action='store_true')
     parser.add_argument('--model_dir', type=str, default='outputs')
     args = parser.parse_args()
