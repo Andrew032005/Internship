@@ -135,6 +135,49 @@ def get_rdkit_descriptors_poly(els, coords):
         return sanitize_rdkit_descriptors(res)
     except: return [0.0]*5
 
+def parse_molecule_name_dimer(name):
+    element_to_z = {'H': 1, 'He': 2, 'Li': 3, 'Be': 4, 'B': 5, 'C': 6, 'N': 7, 'O': 8, 'F': 9, 'Na': 11, 'Mg': 12, 'Al': 13, 'Si': 14, 'P': 15, 'S': 16, 'Cl': 17}
+    if name in element_to_z: return [element_to_z[name]], 0
+    if name.endswith('2') and name[:-1] in element_to_z:
+        z = element_to_z[name[:-1]]
+        return [z, z], 1
+    for i in range(1, len(name)):
+        p1, p2 = name[:i], name[i:]
+        if p1 in element_to_z and p2 in element_to_z: return [element_to_z[p1], element_to_z[p2]], 1
+    return [1], 0
+
+def build_graph_dimer(name, bond_length):
+    z, is_diatomic = parse_molecule_name_dimer(name)
+    n = len(z)
+    feats = np.zeros((n, 3))
+    for i in range(n):
+        feats[i, 0] = z[i]
+        if is_diatomic: feats[i, 1] = z[1-i]
+        feats[i, 2] = bond_length
+    edge_index = torch.tensor([[0, 1], [1, 0]], dtype=torch.long) if is_diatomic else torch.empty((2, 0), dtype=torch.long)
+    return Data(x=torch.tensor(feats, dtype=torch.float), edge_index=edge_index)
+
+def get_rdkit_descriptors_dimer(name, bond_length):
+    atom_symbols = re.findall('[A-Z][a-z]?', name)
+    if not atom_symbols: return [0.0]*5
+    if len(atom_symbols) == 1:
+        if bond_length > 0: atom_symbols = [atom_symbols[0], atom_symbols[0]]
+        else: xyz = f"1\n\n{atom_symbols[0]} 0.0 0.0 0.0\n"
+    if len(atom_symbols) > 1:
+        xyz = f"2\n\n{atom_symbols[0]} 0.0 0.0 0.0\n{atom_symbols[1]} 0.0 0.0 {bond_length:.10f}\n"
+    mol = Chem.MolFromXYZBlock(xyz)
+    if not mol: return [0.0]*5
+    try:
+        if mol.GetNumAtoms() > 1: rdDetermineBonds.DetermineBonds(mol)
+        Chem.SanitizeMol(mol)
+        wt = Descriptors.MolWt(mol); mr = Descriptors.MolMR(mol); tpsa = Descriptors.TPSA(mol)
+        Chem.rdPartialCharges.ComputeGasteigerCharges(mol)
+        charges = [mol.GetAtomWithIdx(i).GetDoubleProp('_GasteigerCharge') for i in range(mol.GetNumAtoms())]
+        charges = [c if not np.isnan(c) else 0.0 for c in charges]
+        res = [float(wt), float(mr), float(tpsa), float(max(charges)), float(min(charges))]
+        return sanitize_rdkit_descriptors(res)
+    except: return [0.0]*5
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--val_data', type=str, default='validation-set_2026summer.csv')
@@ -163,9 +206,16 @@ def main():
     for _, row in df.iterrows():
         name, elec = str(row['name']), float(row['total electrons'])
         p = parse_xyz(f"{name}.xyz")
-        if not p: continue
-        z, coords, els = p
-        g = build_poly_graph(z, coords, els)
+
+        if p:
+            z, coords, els = p
+            g = build_poly_graph(z, coords, els)
+            rd = get_rdkit_descriptors_poly(els, coords) if args.use_rdkit else []
+        else:
+            # Diatomic or single atom fallback (e.g. Ba, H2)
+            r1 = float(row['R1']) if 'R1' in row and not pd.isna(row['R1']) else 0.0
+            g = build_graph_dimer(name, r1)
+            rd = get_rdkit_descriptors_dimer(name, r1) if args.use_rdkit else []
 
         # New base for prediction is CCSDT (column index 8 or row['CCSDT Energy'])
         CCSDT = row['CCSDT Energy']
@@ -175,7 +225,6 @@ def main():
         mf = calculate_maths_features(row['RHF Energy (Hartree)'], row['MP2 Energy'], row['CCSD Energy'], row['CCSD(T) Energy'])
         m_s = torch.tensor(m_scaler.transform([mf]), dtype=torch.float)
         e_s = torch.tensor(e_scaler.transform([[elec]]), dtype=torch.float)
-        rd = get_rdkit_descriptors_poly(els, coords) if args.use_rdkit else []
         r_s = torch.tensor(r_scaler.transform([rd]), dtype=torch.float) if args.use_rdkit else None
 
         with torch.no_grad():
@@ -266,9 +315,16 @@ def main():
     plt.close()
 
     # 7. Saliency (Corrected for GNN)
-    model.eval(); sm = df.iloc[0]; p = parse_xyz(f"{sm['name']}.xyz")
-    if p:
-        z, co, el = p; g = build_poly_graph(z, co, el)
+    model.eval(); sm = df.iloc[0]; name_s = sm['name']; p = parse_xyz(f"{name_s}.xyz")
+    if p or True: # Use any molecule from sample
+        if p:
+            z, co, el = p; g = build_poly_graph(z, co, el)
+            rd = get_rdkit_descriptors_poly(el, co) if args.use_rdkit else []
+        else:
+            r1 = float(sm['R1']) if 'R1' in sm and not pd.isna(sm['R1']) else 0.0
+            g = build_graph_dimer(name_s, r1)
+            rd = get_rdkit_descriptors_dimer(name_s, r1) if args.use_rdkit else []
+
         mf = calculate_maths_features(sm['RHF Energy (Hartree)'], sm['MP2 Energy'], sm['CCSD Energy'], sm['CCSD(T) Energy'])
 
         m_s = torch.tensor(m_scaler.transform([mf]), dtype=torch.float, requires_grad=True)
@@ -276,7 +332,6 @@ def main():
 
         r_s = None
         if args.use_rdkit:
-            rd = get_rdkit_descriptors_poly(el, co)
             r_s = torch.tensor(r_scaler.transform([rd]), dtype=torch.float, requires_grad=True)
 
         g_batch = Batch.from_data_list([g])

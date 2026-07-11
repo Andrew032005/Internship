@@ -126,6 +126,7 @@ def calculate_maths_features(A, B, C, D, epsilon=1e-8):
 
 def sanitize_rdkit_descriptors(raw_features):
     # If error occurred during extraction or value is 0/NaN, replace with -1.0
+    # Unified logic: treat 0.0 as potentially undefined for some features
     return [float(v) if (v != 0.0 and not np.isnan(v)) else -1.0 for v in raw_features]
 
 def get_rdkit_descriptors_dimer(name, bond_length):
